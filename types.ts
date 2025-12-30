@@ -1,6 +1,7 @@
 export interface Unidade {
   id: number;
   nome_unidade: string;
+  empresaid?: string; // UUID for the linked client (Contratante)
 }
 
 export interface Procedimento {
@@ -31,6 +32,7 @@ export interface DocSeg {
   prazo: string;
   data_entrega: string;
   enviado: boolean;
+  obs?: string | null; // Added observations field
   unidades?: Unidade;
   procedimento?: Procedimento;
 }

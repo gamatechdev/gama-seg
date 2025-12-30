@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { DocSeg, MONTHS, Unidade, Procedimento } from '../types';
 import { Card, Badge, Button, Input, Select, GlassHeader, Toggle } from './UI';
-import { Plus, Search, Calendar, FileText as FileIcon, CheckCircle2, Send, Building2, DollarSign, Clock, AlertCircle } from 'lucide-react';
+import { Plus, Search, Calendar, FileText as FileIcon, CheckCircle2, Building2, DollarSign, Clock, AlertCircle, Briefcase, Layers, Check, AlignLeft } from 'lucide-react';
 
 export const DocumentList: React.FC = () => {
   const [documents, setDocuments] = useState<DocSeg[]>([]);
@@ -26,7 +26,12 @@ export const DocumentList: React.FC = () => {
     data_recebimento: new Date().toISOString().split('T')[0],
     prazo: new Date().toISOString().split('T')[0],
     data_entrega: '',
-    valor: 0
+    valor: 0,
+    obs: '', // New field
+    // Financeiro fields
+    empresaResp: 'Gama Medicina', // Default
+    isParcelado: false,
+    qntParcelas: 1
   });
 
   // Edit Form State
@@ -47,8 +52,10 @@ export const DocumentList: React.FC = () => {
       if (error) throw error;
       if (data) setDocuments(data as unknown as DocSeg[]);
 
+      // Fixed: Fetch only existing columns to ensure dropdown works
       const { data: uniData } = await supabase.from('unidades').select('id, nome_unidade');
       const { data: procData } = await supabase.from('procedimento').select('id, nome, idcategoria');
+      
       if (uniData) setUnidades(uniData);
       if (procData) setProcedimentos(procData);
 
@@ -71,7 +78,8 @@ export const DocumentList: React.FC = () => {
         data_recebimento: selectedDoc.data_recebimento,
         prazo: selectedDoc.prazo,
         data_entrega: selectedDoc.data_entrega,
-        enviado: selectedDoc.enviado
+        enviado: selectedDoc.enviado,
+        obs: selectedDoc.obs // Populate obs
       });
     }
   }, [selectedDoc]);
@@ -80,7 +88,8 @@ export const DocumentList: React.FC = () => {
     try {
       if (!createData.empresa || !createData.doc) return alert("Preencha os campos obrigatórios");
 
-      const { error } = await supabase.from('doc_seg').insert({
+      // 1. Insert into Documentos (doc_seg)
+      const { error: docError } = await supabase.from('doc_seg').insert({
         empresa: parseInt(createData.empresa),
         doc: parseInt(createData.doc),
         mes: createData.mes,
@@ -89,13 +98,50 @@ export const DocumentList: React.FC = () => {
         prazo: createData.prazo,
         data_entrega: createData.data_entrega || createData.prazo,
         enviado: false,
-        valor: createData.valor
+        valor: createData.valor,
+        obs: createData.obs // Insert obs
       });
 
-      if (error) throw error;
+      if (docError) throw docError;
+
+      // 2. Insert into Financeiro Receitas
+      // Fetch empresaid from unidades table for the selected unit
+      const { data: unitDetails } = await supabase
+        .from('unidades')
+        .select('empresaid')
+        .eq('id', createData.empresa)
+        .single();
+      
+      // Use empresaid as contratante
+      const contratanteId = unitDetails?.empresaid || null;
+      const selectedProc = procedimentos.find(p => p.id === parseInt(createData.doc));
+      
+      const payloadFinanceiro = {
+        data_projetada: createData.prazo, // Prazo
+        valor_doc: createData.valor,
+        valor_total: createData.valor,
+        status: 'Aguardando',
+        empresa_resp: createData.empresaResp,
+        parcela: createData.isParcelado,
+        qnt_parcela: createData.isParcelado ? createData.qntParcelas : 1,
+        parcela_paga: 0,
+        contratante: contratanteId, 
+        descricao: selectedProc ? `Documento: ${selectedProc.nome}` : 'Documento de Segurança',
+        valor_outros: 0
+      };
+
+      const { error: finError } = await supabase.from('financeiro_receitas').insert(payloadFinanceiro);
+
+      if (finError) {
+        console.error("Erro ao criar financeiro:", finError);
+        alert("Documento criado, mas houve um erro ao gerar o financeiro: " + finError.message);
+      }
       
       setShowCreateModal(false);
+      // Reset sensitive fields
+      setCreateData(prev => ({ ...prev, valor: 0, isParcelado: false, qntParcelas: 1, obs: '' }));
       fetchData();
+
     } catch (error: any) {
       alert("Erro ao criar documento: " + error.message);
     }
@@ -112,7 +158,8 @@ export const DocumentList: React.FC = () => {
           data_recebimento: editData.data_recebimento,
           prazo: editData.prazo,
           data_entrega: editData.data_entrega,
-          enviado: editData.enviado
+          enviado: editData.enviado,
+          obs: editData.obs // Update obs
         })
         .eq('id', selectedDoc.id);
 
@@ -233,7 +280,7 @@ export const DocumentList: React.FC = () => {
       {/* Create Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
-            <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
+            <Card className="w-full max-w-3xl overflow-hidden animate-scale-in p-0 shadow-2xl">
                 <div className="px-8 py-6 border-b border-gray-100 flex justify-between items-center bg-white/50 backdrop-blur-xl">
                     <h2 className="text-2xl font-bold text-gray-900">Novo Documento</h2>
                     <button onClick={() => setShowCreateModal(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-all">
@@ -276,6 +323,67 @@ export const DocumentList: React.FC = () => {
                             >
                                 {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                             </Select>
+                            
+                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2 pt-4">
+                                <Briefcase size={14} /> Financeiro
+                            </h3>
+                            
+                            <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 space-y-4">
+                                <div>
+                                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-2 block">Empresa Responsável</label>
+                                    <div className="flex gap-4">
+                                        <label className={`flex items-center gap-2 cursor-pointer bg-white px-4 py-3 rounded-xl border shadow-sm flex-1 justify-center transition-all ${createData.empresaResp === 'Gama Medicina' ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
+                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${createData.empresaResp === 'Gama Medicina' ? 'border-ios-blue bg-ios-blue' : 'border-gray-300'}`}>
+                                                {createData.empresaResp === 'Gama Medicina' && <Check size={12} className="text-white" />}
+                                            </div>
+                                            <input 
+                                                type="radio" 
+                                                name="empresaResp" 
+                                                className="hidden" 
+                                                checked={createData.empresaResp === 'Gama Medicina'} 
+                                                onChange={() => setCreateData({...createData, empresaResp: 'Gama Medicina'})} 
+                                            />
+                                            <span className={`text-sm font-medium ${createData.empresaResp === 'Gama Medicina' ? 'text-ios-blue' : 'text-gray-600'}`}>Gama Medicina</span>
+                                        </label>
+
+                                        <label className={`flex items-center gap-2 cursor-pointer bg-white px-4 py-3 rounded-xl border shadow-sm flex-1 justify-center transition-all ${createData.empresaResp === 'Gama Soluções' ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
+                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${createData.empresaResp === 'Gama Soluções' ? 'border-ios-blue bg-ios-blue' : 'border-gray-300'}`}>
+                                                {createData.empresaResp === 'Gama Soluções' && <Check size={12} className="text-white" />}
+                                            </div>
+                                            <input 
+                                                type="radio" 
+                                                name="empresaResp" 
+                                                className="hidden" 
+                                                checked={createData.empresaResp === 'Gama Soluções'} 
+                                                onChange={() => setCreateData({...createData, empresaResp: 'Gama Soluções'})} 
+                                            />
+                                            <span className={`text-sm font-medium ${createData.empresaResp === 'Gama Soluções' ? 'text-ios-blue' : 'text-gray-600'}`}>Gama Soluções</span>
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <Toggle 
+                                    label="Parcelamento"
+                                    description="Gerar múltiplas parcelas no financeiro?"
+                                    checked={createData.isParcelado}
+                                    onChange={(val) => setCreateData({...createData, isParcelado: val})}
+                                />
+
+                                {createData.isParcelado && (
+                                    <div className="animate-fade-in">
+                                        <Input 
+                                            label="Quantidade de Parcelas" 
+                                            type="number" 
+                                            min="2"
+                                            max="48"
+                                            icon={<Layers size={16}/>}
+                                            className="bg-white border-blue-200 focus:border-blue-400"
+                                            value={createData.qntParcelas}
+                                            onChange={e => setCreateData({...createData, qntParcelas: parseInt(e.target.value)})}
+                                        />
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         {/* Column 2: Details */}
@@ -324,6 +432,16 @@ export const DocumentList: React.FC = () => {
                                 <option value="Concluido">Concluído</option>
                                 <option value="Entregue">Entregue</option>
                             </Select>
+
+                             <div className="pt-2">
+                                <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-1.5 flex items-center gap-1"><AlignLeft size={10} /> Observações</label>
+                                <textarea
+                                    className="w-full bg-gray-50/80 border border-gray-200 rounded-2xl p-4 text-gray-900 text-sm placeholder-gray-400 focus:bg-white focus:border-ios-blue focus:ring-4 focus:ring-blue-500/10 transition-all outline-none resize-none h-24"
+                                    placeholder="Adicione detalhes, notas ou observações..."
+                                    value={createData.obs}
+                                    onChange={e => setCreateData({...createData, obs: e.target.value})}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -403,6 +521,16 @@ export const DocumentList: React.FC = () => {
                                 onChange={e => setEditData({...editData, data_entrega: e.target.value})}
                             />
                         </div>
+                    </div>
+
+                    <div className="w-full">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-1.5 flex items-center gap-1"><AlignLeft size={10} /> Observações</label>
+                        <textarea
+                            className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-gray-900 text-sm placeholder-gray-400 focus:bg-white focus:border-ios-blue focus:ring-4 focus:ring-blue-500/10 transition-all outline-none resize-none h-24"
+                            placeholder="Observações sobre o documento..."
+                            value={editData.obs || ''}
+                            onChange={e => setEditData({...editData, obs: e.target.value})}
+                        />
                     </div>
 
                     <Toggle 
