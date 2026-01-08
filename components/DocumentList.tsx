@@ -8,6 +8,7 @@ export const DocumentList: React.FC = () => {
   const [documents, setDocuments] = useState<DocSeg[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos');
   
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -83,6 +84,34 @@ export const DocumentList: React.FC = () => {
       });
     }
   }, [selectedDoc]);
+
+  // Calculate status counts
+  const statusCounts = useMemo(() => {
+    const counts = {
+        'Todos': documents.length,
+        'Pendente': 0,
+        'Em Andamento': 0,
+        'Concluido': 0,
+        'Entregue': 0
+    };
+
+    documents.forEach(doc => {
+        if (doc.status === 'Pendente') counts['Pendente']++;
+        if (doc.status === 'Em Andamento') counts['Em Andamento']++;
+        if (doc.status === 'Concluido') counts['Concluido']++;
+        if (doc.status === 'Entregue') counts['Entregue']++;
+    });
+
+    return counts;
+  }, [documents]);
+
+  const filterOptions = [
+      { label: 'Todos', value: 'Todos' },
+      { label: 'Pendente', value: 'Pendente' },
+      { label: 'Em Andamento', value: 'Em Andamento' },
+      { label: 'Concluído', value: 'Concluido' },
+      { label: 'Entregue', value: 'Entregue' },
+  ];
 
   const handleCreate = async () => {
     try {
@@ -201,15 +230,44 @@ export const DocumentList: React.FC = () => {
       />
 
       <div className="px-8">
-        <div className="relative mb-8 max-w-md">
-            <Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
-            <input 
-                type="text" 
-                placeholder="Buscar documento ou empresa..." 
-                className="w-full pl-12 pr-4 py-3.5 bg-white rounded-2xl shadow-sm border-none focus:ring-2 focus:ring-ios-blue outline-none transition-shadow"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-            />
+        <div className="flex flex-col gap-6 mb-8">
+            <div className="relative w-full">
+                <Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
+                <input 
+                    type="text" 
+                    placeholder="Buscar documento ou empresa..." 
+                    className="w-full pl-12 pr-4 py-3.5 bg-white rounded-2xl shadow-sm border-none focus:ring-2 focus:ring-ios-blue outline-none transition-shadow"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                />
+            </div>
+            
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2">
+                {filterOptions.map(opt => (
+                    <button 
+                        key={opt.value}
+                        onClick={() => setStatusFilter(opt.value)}
+                        className={`
+                            flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 border whitespace-nowrap
+                            ${statusFilter === opt.value 
+                                ? 'bg-ios-blue border-ios-blue text-white shadow-lg shadow-blue-500/30 scale-105' 
+                                : 'bg-white border-white hover:border-gray-200 text-gray-500 hover:bg-gray-50'
+                            }
+                        `}
+                    >
+                        {opt.label}
+                        <span className={`
+                            flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full text-[10px] font-bold
+                            ${statusFilter === opt.value 
+                                ? 'bg-white/20 text-white' 
+                                : 'bg-gray-100 text-gray-400'
+                            }
+                        `}>
+                            {statusCounts[opt.value as keyof typeof statusCounts] || 0}
+                        </span>
+                    </button>
+                ))}
+            </div>
         </div>
 
         {loading ? (
@@ -219,10 +277,15 @@ export const DocumentList: React.FC = () => {
         ) : (
             <div className="space-y-12">
             {filteredMonths.map(month => {
-                const docsInMonth = groupedDocs[month].filter(d => 
-                    d.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                    d.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase())
-                );
+                const docsInMonth = groupedDocs[month].filter(d => {
+                    const matchesSearch = 
+                        d.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        d.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
+                    
+                    const matchesStatus = statusFilter === 'Todos' || d.status === statusFilter;
+
+                    return matchesSearch && matchesStatus;
+                });
                 
                 if (docsInMonth.length === 0) return null;
 
