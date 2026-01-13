@@ -98,9 +98,10 @@ export const TrainingList: React.FC = () => {
     if (n.includes('socorros')) return 'ps';
     
     // NRs
-    if (n.includes('nr06') || n.includes('nr 06') || n.includes('epi')) return 'nr06';
+    if (n.includes('nr06') || n.includes('nr 06') || n.includes('nr-06') || n.includes('epi')) return 'nr06';
     if (n.includes('nr11') || n.includes('nr 11') || n.includes('empilhadeira') || n.includes('transporte')) return 'nr11';
     if (n.includes('nr12') || n.includes('nr 12') || n.includes('maquinas')) return 'nr12';
+    if (n.includes('nr17') || n.includes('nr 17') || n.includes('ergonomia')) return 'nr17';
     if (n.includes('nr18') || n.includes('nr 18') || n.includes('construcao')) return 'nr18';
     if (n.includes('nr20') || n.includes('nr 20') || n.includes('inflamaveis')) return 'nr20';
     if (n.includes('nr23') || n.includes('nr 23') || n.includes('incendio')) return 'nr23';
@@ -119,7 +120,16 @@ export const TrainingList: React.FC = () => {
   const handleGenerateCertificate = async () => {
     if (!selectedTraining || !selectedTraining.aluno_rel || !selectedTraining.procedimento) return;
 
-    const tag = detectTrainingTag(selectedTraining.procedimento.nome);
+    let tag = detectTrainingTag(selectedTraining.procedimento.nome);
+    
+    // Fallback: If tag detection failed but it is ID 417, force NR 06
+    if (!tag && selectedTraining.procedimento.id === 417) {
+        tag = 'nr06';
+    }
+    // Fallback: If tag detection failed but it is ID 428, force NR 17
+    if (!tag && selectedTraining.procedimento.id === 428) {
+        tag = 'nr17';
+    }
     
     if (!tag) {
         alert("Não foi possível identificar a TAG deste treinamento (NR ou Curso). Verifique o nome do procedimento.");
@@ -280,8 +290,11 @@ export const TrainingList: React.FC = () => {
     .map(Number)
     .sort((a, b) => b - a);
 
-  // Filter procedures for dropdown (idcategoria 46) AND supported tags
+  // Filter procedures for dropdown (idcategoria 46) AND supported tags OR specific ID 417, 428
   const filteredProcedimentos = procedimentos.filter(p => {
+    if (p.id === 417) return true; // Explicitly allow NR 06 (ID 417)
+    if (p.id === 428) return true; // Explicitly allow NR 17 (ID 428)
+    
     if (p.idcategoria !== 46) return false;
     const tag = detectTrainingTag(p.nome);
     return tag !== ''; // Only allow if mapped to a known tag

@@ -53,9 +53,10 @@ export const StudentList: React.FC = () => {
     if (n.includes('socorros')) return 'ps';
     
     // NRs
-    if (n.includes('nr06') || n.includes('nr 06') || n.includes('epi')) return 'nr06';
+    if (n.includes('nr06') || n.includes('nr 06') || n.includes('nr-06') || n.includes('epi')) return 'nr06';
     if (n.includes('nr11') || n.includes('nr 11') || n.includes('empilhadeira') || n.includes('transporte')) return 'nr11';
     if (n.includes('nr12') || n.includes('nr 12') || n.includes('maquinas')) return 'nr12';
+    if (n.includes('nr17') || n.includes('nr 17') || n.includes('ergonomia')) return 'nr17';
     if (n.includes('nr18') || n.includes('nr 18') || n.includes('construcao')) return 'nr18';
     if (n.includes('nr20') || n.includes('nr 20') || n.includes('inflamaveis')) return 'nr20';
     if (n.includes('nr23') || n.includes('nr 23') || n.includes('incendio')) return 'nr23';
@@ -86,8 +87,11 @@ export const StudentList: React.FC = () => {
       // then filter in memory for robustness (matching TrainingList logic)
       const { data: procData } = await supabase.from('procedimento').select('id, nome, idcategoria');
       if (procData) {
-        // Filter only supported trainings
+        // Filter only supported trainings or specific IDs
         const supported = procData.filter(p => {
+            if (p.id === 417) return true; // Explicitly allow NR 06 (ID 417)
+            if (p.id === 428) return true; // Explicitly allow NR 17 (ID 428)
+
             if (p.idcategoria !== 46) return false;
             return detectTrainingTag(p.nome) !== '';
         });
