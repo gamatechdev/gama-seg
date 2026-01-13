@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { DocSeg, MONTHS, Unidade, Procedimento } from '../types';
 import { Card, Badge, Button, Input, Select, GlassHeader, Toggle } from './UI';
-import { Plus, Search, Calendar, FileText as FileIcon, CheckCircle2, Building2, DollarSign, Clock, AlertCircle, Briefcase, Layers, Check, AlignLeft } from 'lucide-react';
+import { Plus, Search, Calendar, FileText as FileIcon, CheckCircle2, Building2, DollarSign, Clock, AlertCircle, Briefcase, Layers, Check, AlignLeft, Trash2, AlertTriangle, X } from 'lucide-react';
 
 export const DocumentList: React.FC = () => {
   const [documents, setDocuments] = useState<DocSeg[]>([]);
@@ -13,6 +13,7 @@ export const DocumentList: React.FC = () => {
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocSeg | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); // New state for delete confirmation
 
   // Form Data
   const [unidades, setUnidades] = useState<Unidade[]>([]);
@@ -198,6 +199,53 @@ export const DocumentList: React.FC = () => {
       fetchData();
     } catch (error: any) {
       alert("Erro ao atualizar: " + error.message);
+    }
+  };
+
+  // Triggered by the trash button
+  const handleRequestDelete = () => {
+      setShowDeleteConfirm(true);
+  };
+
+  // The actual deletion logic
+  const executeDelete = async () => {
+    if (!selectedDoc) {
+        console.error("❌ Tentativa de exclusão sem documento selecionado.");
+        return;
+    }
+    
+    const idToDelete = selectedDoc.id;
+    console.group("🗑️ Executando Exclusão (Modal)");
+    console.log("📍 ID do Documento:", idToDelete);
+
+    try {
+        console.log("📡 Enviando requisição DELETE para o Supabase...");
+        
+        const { data, error, count } = await supabase
+            .from('doc_seg')
+            .delete()
+            .eq('id', idToDelete)
+            .select();
+
+        if (error) {
+            console.error("❌ Erro retornado pelo Supabase:", error);
+            throw error;
+        }
+
+        console.log("✅ Resposta do Supabase:", { data, count });
+
+        // Close everything on success
+        setShowDeleteConfirm(false);
+        setSelectedDoc(null);
+        fetchData();
+        // Optional: Show a small toast notification here instead of alert
+
+    } catch (error: any) {
+        console.error("❌ Exceção capturada:", error);
+        alert("Erro ao excluir: " + (error.message || JSON.stringify(error)));
+        setShowDeleteConfirm(false); // Close confirm modal on error
+    } finally {
+        console.groupEnd();
     }
   };
 
@@ -528,9 +576,18 @@ export const DocumentList: React.FC = () => {
                             <FileIcon size={12} /> {selectedDoc.procedimento?.nome}
                         </p>
                     </div>
-                    <button onClick={() => setSelectedDoc(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                        <span className="text-2xl">&times;</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={handleRequestDelete}
+                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                            title="Excluir Documento"
+                        >
+                            <Trash2 size={20} />
+                        </button>
+                        <button onClick={() => setSelectedDoc(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                            <span className="text-2xl leading-none">&times;</span>
+                        </button>
+                    </div>
                 </div>
                 
                 <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
@@ -610,6 +667,38 @@ export const DocumentList: React.FC = () => {
                 </div>
             </Card>
         </div>
+      )}
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-6 animate-fade-in">
+              <Card className="w-full max-w-sm overflow-hidden animate-scale-in p-6 shadow-2xl border-2 border-white/50 relative">
+                  <div className="flex flex-col items-center text-center space-y-4">
+                      <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-2">
+                          <AlertTriangle size={32} strokeWidth={2} />
+                      </div>
+                      
+                      <div>
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">Excluir Documento?</h3>
+                          <p className="text-sm text-gray-500 leading-relaxed">
+                              Tem certeza que deseja excluir <strong>{selectedDoc?.procedimento?.nome}</strong> da empresa <strong>{selectedDoc?.unidades?.nome_unidade}</strong>?
+                          </p>
+                          <p className="text-xs text-gray-400 mt-2 font-medium bg-gray-50 py-1 px-2 rounded-lg inline-block">
+                              O registro financeiro NÃO será apagado.
+                          </p>
+                      </div>
+
+                      <div className="flex gap-3 w-full mt-4">
+                          <Button variant="secondary" className="flex-1" onClick={() => setShowDeleteConfirm(false)}>
+                              Cancelar
+                          </Button>
+                          <Button variant="danger" className="flex-1 shadow-red-500/20" onClick={executeDelete}>
+                              Sim, Excluir
+                          </Button>
+                      </div>
+                  </div>
+              </Card>
+          </div>
       )}
     </div>
   );
