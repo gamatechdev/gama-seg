@@ -106,6 +106,7 @@ export const TrainingList: React.FC = () => {
     if (n.includes('nr20') || n.includes('nr 20') || n.includes('inflamaveis')) return 'nr20';
     if (n.includes('nr23') || n.includes('nr 23') || n.includes('incendio')) return 'nr23';
     if (n.includes('nr26') || n.includes('nr 26') || n.includes('sinalizacao')) return 'nr26';
+    if (n.includes('nr34') || n.includes('nr 34') || n.includes('naval')) return 'nr34';
     if (n.includes('nr35') || n.includes('nr 35') || n.includes('altura')) return 'nr35';
     
     return ''; // Unknown tag - will be filtered out
@@ -129,6 +130,10 @@ export const TrainingList: React.FC = () => {
     // Fallback: If tag detection failed but it is ID 428, force NR 17
     if (!tag && selectedTraining.procedimento.id === 428) {
         tag = 'nr17';
+    }
+    // Fallback: If tag detection failed but it is ID 445, force NR 34
+    if (!tag && selectedTraining.procedimento.id === 445) {
+        tag = 'nr34';
     }
     
     if (!tag) {
@@ -290,10 +295,11 @@ export const TrainingList: React.FC = () => {
     .map(Number)
     .sort((a, b) => b - a);
 
-  // Filter procedures for dropdown (idcategoria 46) AND supported tags OR specific ID 417, 428
+  // Filter procedures for dropdown (idcategoria 46) AND supported tags OR specific ID 417, 428, 445
   const filteredProcedimentos = procedimentos.filter(p => {
     if (p.id === 417) return true; // Explicitly allow NR 06 (ID 417)
     if (p.id === 428) return true; // Explicitly allow NR 17 (ID 428)
+    if (p.id === 445) return true; // Explicitly allow NR 34 (ID 445)
     
     if (p.idcategoria !== 46) return false;
     const tag = detectTrainingTag(p.nome);

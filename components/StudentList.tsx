@@ -61,6 +61,7 @@ export const StudentList: React.FC = () => {
     if (n.includes('nr20') || n.includes('nr 20') || n.includes('inflamaveis')) return 'nr20';
     if (n.includes('nr23') || n.includes('nr 23') || n.includes('incendio')) return 'nr23';
     if (n.includes('nr26') || n.includes('nr 26') || n.includes('sinalizacao')) return 'nr26';
+    if (n.includes('nr34') || n.includes('nr 34') || n.includes('naval')) return 'nr34';
     if (n.includes('nr35') || n.includes('nr 35') || n.includes('altura')) return 'nr35';
     
     return ''; // Unknown tag - will be filtered out
@@ -91,6 +92,7 @@ export const StudentList: React.FC = () => {
         const supported = procData.filter(p => {
             if (p.id === 417) return true; // Explicitly allow NR 06 (ID 417)
             if (p.id === 428) return true; // Explicitly allow NR 17 (ID 428)
+            if (p.id === 445) return true; // Explicitly allow NR 34 (ID 445)
 
             if (p.idcategoria !== 46) return false;
             return detectTrainingTag(p.nome) !== '';
