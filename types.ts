@@ -50,6 +50,7 @@ export interface Treinamento {
   participou: boolean | null;
   url_certificado: string | null;
   certificado_enviado: boolean | null;
+  faturado?: boolean; // Added for financial control
   aluno_data?: Aluno; // Mapped manually or via view
   procedimento?: Procedimento;
   aluno_rel?: Aluno; // Supabase relation alias might vary

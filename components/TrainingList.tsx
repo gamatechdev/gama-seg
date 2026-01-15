@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { Treinamento, MONTHS, Aluno, Procedimento } from '../types';
 import { Card, Badge, Button, Input, Select, GlassHeader, Toggle } from './UI';
-import { Plus, Search, Calendar, User, Clock, GraduationCap, CheckCircle, DollarSign, Laptop, FileText, Loader2, Download, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Calendar, User, Clock, GraduationCap, CheckCircle, DollarSign, Laptop, FileText, Loader2, Download, AlertTriangle, Wallet, CheckCircle2 } from 'lucide-react';
 
 export const TrainingList: React.FC = () => {
   const [trainings, setTrainings] = useState<Treinamento[]>([]);
@@ -30,12 +30,16 @@ export const TrainingList: React.FC = () => {
   });
 
   // Edit Data
-  const [editData, setEditData] = useState<Partial<Treinamento>>({});
+  const [editData, setEditData] = useState<Partial<Treinamento> & {
+    empresaResp?: string;
+    isParcelado?: boolean;
+    qntParcelas?: number;
+  }>({});
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Updated query to fetch company name (unidades) via aluno relation for the certificate
+      // Updated query to fetch company name (unidades) via aluno relation for the certificate AND empresaid for finance
       const { data, error } = await supabase
         .from('treinamentos')
         .select(`
@@ -44,7 +48,7 @@ export const TrainingList: React.FC = () => {
             id, 
             nome, 
             cpf, 
-            unidades:empresa (nome_unidade)
+            unidades:empresa (nome_unidade, empresaid)
           ),
           procedimento:treinamento (id, nome, idcategoria)
         `)
@@ -78,7 +82,12 @@ export const TrainingList: React.FC = () => {
             valor: selectedTraining.valor,
             participou: selectedTraining.participou,
             certificado_enviado: selectedTraining.certificado_enviado,
-            url_certificado: selectedTraining.url_certificado
+            url_certificado: selectedTraining.url_certificado,
+            faturado: selectedTraining.faturado || false,
+            // Defaults for billing
+            empresaResp: 'Gama Medicina',
+            isParcelado: false,
+            qntParcelas: 1
         });
     }
   }, [selectedTraining]);
@@ -173,12 +182,6 @@ export const TrainingList: React.FC = () => {
             valor: Number(editData.valor || 0)
         };
 
-        // --- DEBUG LOGS ---
-        console.group("🚀 Debug: Gerando Certificado");
-        console.log("📍 URL Alvo: https://certificado-api.vercel.app/certificados");
-        console.log("📦 Payload (Body):", JSON.stringify(payload, null, 2));
-        // ------------------
-
         const response = await fetch("https://certificado-api.vercel.app/certificados", {
             method: "POST",
             headers: {
@@ -189,18 +192,12 @@ export const TrainingList: React.FC = () => {
             body: JSON.stringify(payload)
         });
 
-        console.log("📡 Response Status:", response.status);
-
         if (!response.ok) {
             const errorText = await response.text().catch(() => "Unknown API Error");
-            console.error("❌ Erro da API (Texto):", errorText);
             throw new Error(`API Error: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
-        console.log("✅ Dados recebidos da API:", data);
-        console.groupEnd();
-
         const url = data.url || data.certificateUrl || (typeof data === 'string' ? data : null);
 
         if (!url) throw new Error("API não retornou uma URL válida.");
@@ -222,14 +219,10 @@ export const TrainingList: React.FC = () => {
         alert("Certificado gerado com sucesso!");
 
     } catch (error: any) {
-        console.error("❌ Erro Catch:", error);
-        console.groupEnd();
-        
         let msg = error.message;
         if (msg === "Failed to fetch") {
             msg = "Falha na conexão. Verifique se o servidor da API está online e aceita requisições (Erro de CORS/Rede).";
         }
-        
         alert("Erro ao gerar certificado: " + msg);
     } finally {
         setGeneratingCert(false);
@@ -248,7 +241,8 @@ export const TrainingList: React.FC = () => {
         modelo: formData.modelo,
         valor: formData.valor,
         participou: formData.participou,
-        certificado_enviado: false
+        certificado_enviado: false,
+        faturado: false
       });
 
       if (error) throw error;
@@ -262,6 +256,84 @@ export const TrainingList: React.FC = () => {
   const handleUpdate = async () => {
       if (!selectedTraining) return;
       try {
+          // 1. Financeiro & Metas Logic
+          if (editData.faturado && !selectedTraining.faturado) {
+             // Extract empresaid from the nested relation in aluno
+             let contratanteId = null;
+             const unidadesRel = (selectedTraining.aluno_rel as any)?.unidades;
+             
+             if (unidadesRel) {
+                if (Array.isArray(unidadesRel) && unidadesRel.length > 0) {
+                    contratanteId = unidadesRel[0].empresaid;
+                } else if (typeof unidadesRel === 'object') {
+                    contratanteId = unidadesRel.empresaid;
+                }
+             }
+
+             // Insert into financeiro_receitas
+             const payloadFinanceiro = {
+                data_projetada: editData.data_realizacao || new Date().toISOString().split('T')[0],
+                valor_doc: editData.valor,
+                valor_total: editData.valor,
+                status: 'Aguardando',
+                empresa_resp: editData.empresaResp,
+                parcela: editData.isParcelado,
+                qnt_parcela: editData.isParcelado ? editData.qntParcelas : 1,
+                parcela_paga: 0,
+                contratante: contratanteId, 
+                descricao: `Treinamento: ${selectedTraining.procedimento?.nome} - ${selectedTraining.aluno_rel?.nome}`,
+                valor_outros: 0
+             };
+
+             const { error: finError } = await supabase.from('financeiro_receitas').insert(payloadFinanceiro);
+             if (finError) throw new Error("Erro ao gerar financeiro: " + finError.message);
+
+             // --- LOGICA GERENCIA_META (ID 5) ---
+             const gerenciaId = 5;
+             const valorToAdd = editData.valor || 0;
+             const now = new Date();
+             const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+             const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+
+             // Tenta buscar registro existente para este mês e gerencia
+             const { data: existingMeta, error: metaFetchError } = await supabase
+                .from('gerencia_meta')
+                .select('id, faturamento')
+                .eq('gerencia', gerenciaId)
+                .gte('created_at', startOfMonth)
+                .lte('created_at', endOfMonth)
+                .maybeSingle();
+
+             if (metaFetchError && metaFetchError.code !== 'PGRST116') {
+                console.error("Erro ao buscar meta:", metaFetchError);
+             }
+
+             if (existingMeta) {
+                // Existe: Soma ao valor atual
+                const newFaturamento = (existingMeta.faturamento || 0) + valorToAdd;
+                const { error: updateMetaError } = await supabase
+                    .from('gerencia_meta')
+                    .update({ faturamento: newFaturamento })
+                    .eq('id', existingMeta.id);
+                
+                if (updateMetaError) console.error("Erro ao atualizar meta:", updateMetaError);
+                else console.log("Meta de treinamento (ID 5) atualizada com sucesso (+R$", valorToAdd, ")");
+             } else {
+                // Não existe: Cria nova linha
+                const { error: insertMetaError } = await supabase
+                    .from('gerencia_meta')
+                    .insert({
+                        gerencia: gerenciaId,
+                        faturamento: valorToAdd
+                    });
+                
+                if (insertMetaError) console.error("Erro ao criar meta:", insertMetaError);
+                else console.log("Nova meta de treinamento criada para o mês (R$", valorToAdd, ")");
+             }
+             
+             alert("Financeiro e Metas processados com sucesso!");
+          }
+
           const { error } = await supabase.from('treinamentos').update({
               data_realizacao: editData.data_realizacao,
               horario: editData.horario,
@@ -269,7 +341,8 @@ export const TrainingList: React.FC = () => {
               valor: editData.valor,
               participou: editData.participou,
               certificado_enviado: editData.certificado_enviado,
-              url_certificado: editData.url_certificado
+              url_certificado: editData.url_certificado,
+              faturado: editData.faturado
           }).eq('id', selectedTraining.id);
 
           if (error) throw error;
@@ -383,6 +456,11 @@ export const TrainingList: React.FC = () => {
                                          <Clock size={12} className="text-gray-400" />
                                         {t.horario.substring(0, 5)}
                                     </div>
+                                    {t.faturado && (
+                                        <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
+                                            <DollarSign size={10} />
+                                        </div>
+                                    )}
                                 </div>
                                 
                                 {t.url_certificado && (
@@ -521,7 +599,7 @@ export const TrainingList: React.FC = () => {
                 </div>
                 
                 <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-                    {/* Certificate Section - Highlighted */}
+                    {/* Certificate Section */}
                     <div className="bg-gradient-to-br from-indigo-50 to-blue-50 p-4 rounded-2xl border border-indigo-100 shadow-sm">
                         <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-3 flex items-center gap-1">
                             <FileText size={12} /> Certificação
@@ -578,12 +656,6 @@ export const TrainingList: React.FC = () => {
                                 </button>
                             </div>
                         )}
-                        {!editData.participou && !editData.url_certificado && (
-                             <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-600 font-medium">
-                                <AlertTriangle size={10} />
-                                Confirme a presença para gerar o certificado.
-                            </div>
-                        )}
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -621,6 +693,77 @@ export const TrainingList: React.FC = () => {
                             value={editData.valor || 0}
                             onChange={e => setEditData({...editData, valor: parseFloat(e.target.value)})}
                         />
+                    </div>
+                    
+                    {/* Billing Section */}
+                    <div className={`p-5 rounded-2xl border transition-all duration-300 ${editData.faturado ? 'bg-blue-50/50 border-blue-200' : 'bg-gray-50 border-gray-100'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${editData.faturado ? 'text-ios-blue' : 'text-gray-400'}`}>
+                                <Wallet size={12} /> Faturamento
+                            </h3>
+                            <Toggle 
+                                label={editData.faturado ? "Faturado" : "Gerar Faturamento"}
+                                checked={editData.faturado || false}
+                                onChange={(val) => {
+                                    if(selectedTraining.faturado && !val) {
+                                        alert("Não é possível cancelar o faturamento por aqui. Contate o suporte.");
+                                        return;
+                                    }
+                                    setEditData({...editData, faturado: val})
+                                }}
+                            />
+                        </div>
+
+                        {editData.faturado && !selectedTraining.faturado && (
+                            <div className="animate-fade-in space-y-4 pt-2">
+                                 <div>
+                                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-2 block">Empresa Responsável</label>
+                                    <div className="flex gap-2">
+                                        {['Gama Medicina', 'Gama Soluções'].map(emp => (
+                                            <label key={emp} className={`flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border shadow-sm flex-1 justify-center transition-all ${editData.empresaResp === emp ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
+                                                <input 
+                                                    type="radio" 
+                                                    name="empresaRespEdit" 
+                                                    className="hidden" 
+                                                    checked={editData.empresaResp === emp} 
+                                                    onChange={() => setEditData({...editData, empresaResp: emp})} 
+                                                />
+                                                <span className={`text-xs font-medium ${editData.empresaResp === emp ? 'text-ios-blue' : 'text-gray-600'}`}>{emp}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-4">
+                                     <Toggle 
+                                        label="Parcelado?"
+                                        checked={editData.isParcelado || false}
+                                        onChange={(val) => setEditData({...editData, isParcelado: val})}
+                                    />
+                                    {editData.isParcelado && (
+                                        <div className="flex-1 animate-fade-in">
+                                            <Input 
+                                                label="Qtd. Parcelas" 
+                                                type="number" 
+                                                min="2"
+                                                max="48"
+                                                className="bg-white border-blue-200 focus:border-blue-400 mb-0"
+                                                value={editData.qntParcelas}
+                                                onChange={e => setEditData({...editData, qntParcelas: parseInt(e.target.value)})}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="text-[10px] text-blue-500 bg-blue-100/50 p-2 rounded-lg">
+                                    Ao salvar, um registro financeiro será criado automaticamente.
+                                </p>
+                            </div>
+                        )}
+                        {selectedTraining.faturado && (
+                            <div className="text-xs text-green-600 font-medium flex items-center gap-2 bg-green-50 p-2 rounded-lg">
+                                <CheckCircle2 size={12}/> Financeiro já gerado para este treinamento.
+                            </div>
+                        )}
                     </div>
 
                     <div className="space-y-3 pt-4 border-t border-gray-100">

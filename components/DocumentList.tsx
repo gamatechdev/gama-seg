@@ -162,7 +162,7 @@ export const DocumentList: React.FC = () => {
     try {
       // 1. Check if we need to generate finance records (Transitioning from Not Faturado -> Faturado)
       if (editData.faturado && !selectedDoc.faturado) {
-          // Fetch empresaid from unidades table for the selected unit
+          // --- LOGICA FINANCEIRO RECEITAS ---
           const { data: unitDetails } = await supabase
             .from('unidades')
             .select('empresaid')
@@ -187,8 +187,53 @@ export const DocumentList: React.FC = () => {
 
           const { error: finError } = await supabase.from('financeiro_receitas').insert(payloadFinanceiro);
           if (finError) throw new Error("Erro ao gerar financeiro: " + finError.message);
+
+          // --- LOGICA GERENCIA_META ---
+          const gerenciaId = 24;
+          const valorToAdd = editData.valor || 0;
+          const now = new Date();
+          // Calcula início e fim do mês atual para verificar a existência da meta no mês
+          const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+          const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+
+          // Tenta buscar registro existente para este mês e gerencia
+          const { data: existingMeta, error: metaFetchError } = await supabase
+              .from('gerencia_meta')
+              .select('id, faturamento')
+              .eq('gerencia', gerenciaId)
+              .gte('created_at', startOfMonth)
+              .lte('created_at', endOfMonth)
+              .maybeSingle();
+
+          if (metaFetchError && metaFetchError.code !== 'PGRST116') {
+             console.error("Erro ao verificar meta:", metaFetchError);
+          }
+
+          if (existingMeta) {
+              // Existe: Soma ao valor atual
+              const newFaturamento = (existingMeta.faturamento || 0) + valorToAdd;
+              const { error: updateMetaError } = await supabase
+                  .from('gerencia_meta')
+                  .update({ faturamento: newFaturamento })
+                  .eq('id', existingMeta.id);
+              
+              if (updateMetaError) console.error("Erro ao atualizar meta:", updateMetaError);
+              else console.log("Meta atualizada com sucesso (+R$", valorToAdd, ")");
+          } else {
+              // Não existe: Cria nova linha
+              const { error: insertMetaError } = await supabase
+                  .from('gerencia_meta')
+                  .insert({
+                      gerencia: gerenciaId,
+                      faturamento: valorToAdd
+                      // Outros campos (in, cf, cv, etc) assumem default 0 do banco
+                  });
+
+              if (insertMetaError) console.error("Erro ao criar meta:", insertMetaError);
+              else console.log("Nova meta criada para o mês (R$", valorToAdd, ")");
+          }
           
-          alert("Financeiro gerado com sucesso!");
+          alert("Financeiro e Metas processados com sucesso!");
       }
 
       // 2. Update doc_seg
