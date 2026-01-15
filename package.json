@@ -1,5 +1,5 @@
 {
-  "name": "gama-center-safety-os",
+  "name": "gama-center-financial",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,10 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lucide-react": "^0.556.0",
-    "@supabase/supabase-js": "^2.86.2",
-    "react-dom": "^19.2.1",
-    "react": "^19.2.1"
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "@supabase/supabase-js": "^2.87.1",
+    "lucide-react": "^0.561.0",
+    "recharts": "2.15.0",
+    "xlsx": "0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
