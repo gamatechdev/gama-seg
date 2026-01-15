@@ -32,6 +32,7 @@ export interface DocSeg {
   prazo: string;
   data_entrega: string;
   enviado: boolean;
+  faturado?: boolean; // New field for financial control
   obs?: string | null; // Added observations field
   unidades?: Unidade;
   procedimento?: Procedimento;

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { DocSeg, MONTHS, Unidade, Procedimento } from '../types';
 import { Card, Badge, Button, Input, Select, GlassHeader, Toggle } from './UI';
-import { Plus, Search, Calendar, FileText as FileIcon, CheckCircle2, Building2, DollarSign, Clock, AlertCircle, Briefcase, Layers, Check, AlignLeft, Trash2, AlertTriangle, X } from 'lucide-react';
+import { Plus, Search, Calendar, FileText as FileIcon, CheckCircle2, Building2, DollarSign, Clock, AlertCircle, Briefcase, Layers, Check, AlignLeft, Trash2, AlertTriangle, X, Wallet } from 'lucide-react';
 
 export const DocumentList: React.FC = () => {
   const [documents, setDocuments] = useState<DocSeg[]>([]);
@@ -13,7 +13,7 @@ export const DocumentList: React.FC = () => {
   // Modals state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocSeg | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false); // New state for delete confirmation
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Form Data
   const [unidades, setUnidades] = useState<Unidade[]>([]);
@@ -29,15 +29,24 @@ export const DocumentList: React.FC = () => {
     prazo: new Date().toISOString().split('T')[0],
     data_entrega: '',
     valor: 0,
-    obs: '', // New field
-    // Financeiro fields
-    empresaResp: 'Gama Medicina', // Default
-    isParcelado: false,
-    qntParcelas: 1
+    obs: ''
   });
 
-  // Edit Form State
-  const [editData, setEditData] = useState<Partial<DocSeg>>({});
+  // Edit Form State - Includes extra fields for billing configuration
+  const [editData, setEditData] = useState<{
+    status?: string;
+    valor?: number;
+    data_recebimento?: string;
+    prazo?: string;
+    data_entrega?: string;
+    enviado?: boolean;
+    obs?: string | null;
+    faturado?: boolean;
+    // Temporary billing fields used only during update
+    empresaResp?: string;
+    isParcelado?: boolean;
+    qntParcelas?: number;
+  }>({});
 
   const fetchData = async () => {
     setLoading(true);
@@ -54,7 +63,6 @@ export const DocumentList: React.FC = () => {
       if (error) throw error;
       if (data) setDocuments(data as unknown as DocSeg[]);
 
-      // Fixed: Fetch only existing columns to ensure dropdown works
       const { data: uniData } = await supabase.from('unidades').select('id, nome_unidade');
       const { data: procData } = await supabase.from('procedimento').select('id, nome, idcategoria');
       
@@ -76,12 +84,17 @@ export const DocumentList: React.FC = () => {
     if (selectedDoc) {
       setEditData({
         status: selectedDoc.status,
-        valor: selectedDoc.valor,
+        valor: selectedDoc.valor || 0,
         data_recebimento: selectedDoc.data_recebimento,
         prazo: selectedDoc.prazo,
         data_entrega: selectedDoc.data_entrega,
         enviado: selectedDoc.enviado,
-        obs: selectedDoc.obs // Populate obs
+        obs: selectedDoc.obs,
+        faturado: selectedDoc.faturado || false,
+        // Defaults for billing
+        empresaResp: 'Gama Medicina',
+        isParcelado: false,
+        qntParcelas: 1
       });
     }
   }, [selectedDoc]);
@@ -118,7 +131,7 @@ export const DocumentList: React.FC = () => {
     try {
       if (!createData.empresa || !createData.doc) return alert("Preencha os campos obrigatórios");
 
-      // 1. Insert into Documentos (doc_seg)
+      // Insert into Documentos (doc_seg) only. No finance records created yet.
       const { error: docError } = await supabase.from('doc_seg').insert({
         empresa: parseInt(createData.empresa),
         doc: parseInt(createData.doc),
@@ -128,48 +141,15 @@ export const DocumentList: React.FC = () => {
         prazo: createData.prazo,
         data_entrega: createData.data_entrega || createData.prazo,
         enviado: false,
+        faturado: false, // Default false on create
         valor: createData.valor,
-        obs: createData.obs // Insert obs
+        obs: createData.obs
       });
 
       if (docError) throw docError;
 
-      // 2. Insert into Financeiro Receitas
-      // Fetch empresaid from unidades table for the selected unit
-      const { data: unitDetails } = await supabase
-        .from('unidades')
-        .select('empresaid')
-        .eq('id', createData.empresa)
-        .single();
-      
-      // Use empresaid as contratante
-      const contratanteId = unitDetails?.empresaid || null;
-      const selectedProc = procedimentos.find(p => p.id === parseInt(createData.doc));
-      
-      const payloadFinanceiro = {
-        data_projetada: createData.prazo, // Prazo
-        valor_doc: createData.valor,
-        valor_total: createData.valor,
-        status: 'Aguardando',
-        empresa_resp: createData.empresaResp,
-        parcela: createData.isParcelado,
-        qnt_parcela: createData.isParcelado ? createData.qntParcelas : 1,
-        parcela_paga: 0,
-        contratante: contratanteId, 
-        descricao: selectedProc ? `Documento: ${selectedProc.nome}` : 'Documento de Segurança',
-        valor_outros: 0
-      };
-
-      const { error: finError } = await supabase.from('financeiro_receitas').insert(payloadFinanceiro);
-
-      if (finError) {
-        console.error("Erro ao criar financeiro:", finError);
-        alert("Documento criado, mas houve um erro ao gerar o financeiro: " + finError.message);
-      }
-      
       setShowCreateModal(false);
-      // Reset sensitive fields
-      setCreateData(prev => ({ ...prev, valor: 0, isParcelado: false, qntParcelas: 1, obs: '' }));
+      setCreateData(prev => ({ ...prev, valor: 0, obs: '' }));
       fetchData();
 
     } catch (error: any) {
@@ -180,6 +160,38 @@ export const DocumentList: React.FC = () => {
   const handleUpdate = async () => {
     if (!selectedDoc) return;
     try {
+      // 1. Check if we need to generate finance records (Transitioning from Not Faturado -> Faturado)
+      if (editData.faturado && !selectedDoc.faturado) {
+          // Fetch empresaid from unidades table for the selected unit
+          const { data: unitDetails } = await supabase
+            .from('unidades')
+            .select('empresaid')
+            .eq('id', selectedDoc.empresa)
+            .single();
+          
+          const contratanteId = unitDetails?.empresaid || null;
+          
+          const payloadFinanceiro = {
+            data_projetada: editData.prazo,
+            valor_doc: editData.valor,
+            valor_total: editData.valor,
+            status: 'Aguardando',
+            empresa_resp: editData.empresaResp,
+            parcela: editData.isParcelado,
+            qnt_parcela: editData.isParcelado ? editData.qntParcelas : 1,
+            parcela_paga: 0,
+            contratante: contratanteId, 
+            descricao: selectedDoc.procedimento ? `Documento: ${selectedDoc.procedimento.nome}` : 'Documento de Segurança',
+            valor_outros: 0
+          };
+
+          const { error: finError } = await supabase.from('financeiro_receitas').insert(payloadFinanceiro);
+          if (finError) throw new Error("Erro ao gerar financeiro: " + finError.message);
+          
+          alert("Financeiro gerado com sucesso!");
+      }
+
+      // 2. Update doc_seg
       const { error } = await supabase
         .from('doc_seg')
         .update({
@@ -189,7 +201,8 @@ export const DocumentList: React.FC = () => {
           prazo: editData.prazo,
           data_entrega: editData.data_entrega,
           enviado: editData.enviado,
-          obs: editData.obs // Update obs
+          obs: editData.obs,
+          faturado: editData.faturado // Save the billed status
         })
         .eq('id', selectedDoc.id);
 
@@ -202,48 +215,29 @@ export const DocumentList: React.FC = () => {
     }
   };
 
-  // Triggered by the trash button
-  const handleRequestDelete = () => {
-      setShowDeleteConfirm(true);
+  const handleDelete = async () => {
+    // ... logic handled by executeDelete via modal
+    setShowDeleteConfirm(true);
   };
-
-  // The actual deletion logic
+  
   const executeDelete = async () => {
-    if (!selectedDoc) {
-        console.error("❌ Tentativa de exclusão sem documento selecionado.");
-        return;
-    }
-    
+    if (!selectedDoc) return;
     const idToDelete = selectedDoc.id;
     console.group("🗑️ Executando Exclusão (Modal)");
-    console.log("📍 ID do Documento:", idToDelete);
-
     try {
-        console.log("📡 Enviando requisição DELETE para o Supabase...");
-        
         const { data, error, count } = await supabase
             .from('doc_seg')
             .delete()
             .eq('id', idToDelete)
             .select();
 
-        if (error) {
-            console.error("❌ Erro retornado pelo Supabase:", error);
-            throw error;
-        }
-
-        console.log("✅ Resposta do Supabase:", { data, count });
-
-        // Close everything on success
+        if (error) throw error;
         setShowDeleteConfirm(false);
         setSelectedDoc(null);
         fetchData();
-        // Optional: Show a small toast notification here instead of alert
-
     } catch (error: any) {
-        console.error("❌ Exceção capturada:", error);
-        alert("Erro ao excluir: " + (error.message || JSON.stringify(error)));
-        setShowDeleteConfirm(false); // Close confirm modal on error
+        alert("Erro ao excluir: " + error.message);
+        setShowDeleteConfirm(false);
     } finally {
         console.groupEnd();
     }
@@ -373,8 +367,15 @@ export const DocumentList: React.FC = () => {
                                         <Calendar size={12} />
                                         {new Date(doc.prazo).toLocaleDateString()}
                                     </div>
-                                    <div className="text-gray-900 font-semibold">
-                                        {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                    <div className="flex items-center gap-2">
+                                        {doc.faturado && (
+                                            <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
+                                                <DollarSign size={10} />
+                                            </div>
+                                        )}
+                                        <div className="text-gray-900 font-semibold">
+                                            {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                        </div>
                                     </div>
                                 </div>
                             </Card>
@@ -434,67 +435,6 @@ export const DocumentList: React.FC = () => {
                             >
                                 {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                             </Select>
-                            
-                            <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2 pt-4">
-                                <Briefcase size={14} /> Financeiro
-                            </h3>
-                            
-                            <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 space-y-4">
-                                <div>
-                                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-2 block">Empresa Responsável</label>
-                                    <div className="flex gap-4">
-                                        <label className={`flex items-center gap-2 cursor-pointer bg-white px-4 py-3 rounded-xl border shadow-sm flex-1 justify-center transition-all ${createData.empresaResp === 'Gama Medicina' ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
-                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${createData.empresaResp === 'Gama Medicina' ? 'border-ios-blue bg-ios-blue' : 'border-gray-300'}`}>
-                                                {createData.empresaResp === 'Gama Medicina' && <Check size={12} className="text-white" />}
-                                            </div>
-                                            <input 
-                                                type="radio" 
-                                                name="empresaResp" 
-                                                className="hidden" 
-                                                checked={createData.empresaResp === 'Gama Medicina'} 
-                                                onChange={() => setCreateData({...createData, empresaResp: 'Gama Medicina'})} 
-                                            />
-                                            <span className={`text-sm font-medium ${createData.empresaResp === 'Gama Medicina' ? 'text-ios-blue' : 'text-gray-600'}`}>Gama Medicina</span>
-                                        </label>
-
-                                        <label className={`flex items-center gap-2 cursor-pointer bg-white px-4 py-3 rounded-xl border shadow-sm flex-1 justify-center transition-all ${createData.empresaResp === 'Gama Soluções' ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
-                                            <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${createData.empresaResp === 'Gama Soluções' ? 'border-ios-blue bg-ios-blue' : 'border-gray-300'}`}>
-                                                {createData.empresaResp === 'Gama Soluções' && <Check size={12} className="text-white" />}
-                                            </div>
-                                            <input 
-                                                type="radio" 
-                                                name="empresaResp" 
-                                                className="hidden" 
-                                                checked={createData.empresaResp === 'Gama Soluções'} 
-                                                onChange={() => setCreateData({...createData, empresaResp: 'Gama Soluções'})} 
-                                            />
-                                            <span className={`text-sm font-medium ${createData.empresaResp === 'Gama Soluções' ? 'text-ios-blue' : 'text-gray-600'}`}>Gama Soluções</span>
-                                        </label>
-                                    </div>
-                                </div>
-                                
-                                <Toggle 
-                                    label="Parcelamento"
-                                    description="Gerar múltiplas parcelas no financeiro?"
-                                    checked={createData.isParcelado}
-                                    onChange={(val) => setCreateData({...createData, isParcelado: val})}
-                                />
-
-                                {createData.isParcelado && (
-                                    <div className="animate-fade-in">
-                                        <Input 
-                                            label="Quantidade de Parcelas" 
-                                            type="number" 
-                                            min="2"
-                                            max="48"
-                                            icon={<Layers size={16}/>}
-                                            className="bg-white border-blue-200 focus:border-blue-400"
-                                            value={createData.qntParcelas}
-                                            onChange={e => setCreateData({...createData, qntParcelas: parseInt(e.target.value)})}
-                                        />
-                                    </div>
-                                )}
-                            </div>
                         </div>
 
                         {/* Column 2: Details */}
@@ -578,7 +518,7 @@ export const DocumentList: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-2">
                         <button 
-                            onClick={handleRequestDelete}
+                            onClick={handleDelete}
                             className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
                             title="Excluir Documento"
                         >
@@ -641,6 +581,77 @@ export const DocumentList: React.FC = () => {
                                 onChange={e => setEditData({...editData, data_entrega: e.target.value})}
                             />
                         </div>
+                    </div>
+
+                     {/* Billing Section - In Edit Modal */}
+                     <div className={`p-5 rounded-2xl border transition-all duration-300 ${editData.faturado ? 'bg-blue-50/50 border-blue-200' : 'bg-gray-50 border-gray-100'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${editData.faturado ? 'text-ios-blue' : 'text-gray-400'}`}>
+                                <Wallet size={12} /> Faturamento
+                            </h3>
+                            <Toggle 
+                                label={editData.faturado ? "Faturado" : "Gerar Faturamento"}
+                                checked={editData.faturado || false}
+                                onChange={(val) => {
+                                    if(selectedDoc.faturado && !val) {
+                                        alert("Não é possível cancelar o faturamento por aqui. Contate o suporte.");
+                                        return;
+                                    }
+                                    setEditData({...editData, faturado: val})
+                                }}
+                            />
+                        </div>
+
+                        {editData.faturado && !selectedDoc.faturado && (
+                            <div className="animate-fade-in space-y-4 pt-2">
+                                 <div>
+                                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-2 block">Empresa Responsável</label>
+                                    <div className="flex gap-2">
+                                        {['Gama Medicina', 'Gama Soluções'].map(emp => (
+                                            <label key={emp} className={`flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border shadow-sm flex-1 justify-center transition-all ${editData.empresaResp === emp ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
+                                                <input 
+                                                    type="radio" 
+                                                    name="empresaRespEdit" 
+                                                    className="hidden" 
+                                                    checked={editData.empresaResp === emp} 
+                                                    onChange={() => setEditData({...editData, empresaResp: emp})} 
+                                                />
+                                                <span className={`text-xs font-medium ${editData.empresaResp === emp ? 'text-ios-blue' : 'text-gray-600'}`}>{emp}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-4">
+                                     <Toggle 
+                                        label="Parcelado?"
+                                        checked={editData.isParcelado || false}
+                                        onChange={(val) => setEditData({...editData, isParcelado: val})}
+                                    />
+                                    {editData.isParcelado && (
+                                        <div className="flex-1 animate-fade-in">
+                                            <Input 
+                                                label="Qtd. Parcelas" 
+                                                type="number" 
+                                                min="2"
+                                                max="48"
+                                                className="bg-white border-blue-200 focus:border-blue-400 mb-0"
+                                                value={editData.qntParcelas}
+                                                onChange={e => setEditData({...editData, qntParcelas: parseInt(e.target.value)})}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                                <p className="text-[10px] text-blue-500 bg-blue-100/50 p-2 rounded-lg">
+                                    Ao salvar, um registro financeiro será criado automaticamente.
+                                </p>
+                            </div>
+                        )}
+                        {selectedDoc.faturado && (
+                            <div className="text-xs text-green-600 font-medium flex items-center gap-2 bg-green-50 p-2 rounded-lg">
+                                <CheckCircle2 size={12}/> Financeiro já gerado para este documento.
+                            </div>
+                        )}
                     </div>
 
                     <div className="w-full">
