@@ -52,14 +52,15 @@ export const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement> & { 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Extract options from children
-  const options = React.Children.toArray(children).map((child: any) => {
+  const options = React.Children.toArray(children).map((child) => {
      if (!React.isValidElement(child)) return null;
+     const props = child.props as { value?: any; children?: any };
      return {
-        value: child.props.value,
-        label: child.props.children,
-        key: child.key || child.props.value
+        value: props.value,
+        label: props.children,
+        key: child.key || props.value
      };
-  }).filter(Boolean);
+  }).filter((opt): opt is { value: any; label: any; key: any } => opt !== null);
 
   const selectedOption = options.find((opt: any) => String(opt.value) === String(value));
   // If no selection, show the first option if it's a placeholder (often empty value), or just 'Selecione'

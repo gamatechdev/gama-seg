@@ -413,6 +413,11 @@ export const DocumentList: React.FC = () => {
                                         {new Date(doc.prazo).toLocaleDateString()}
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        {doc.obs && (
+                                            <div title="Possui observação" className="bg-yellow-50 text-yellow-600 p-1 rounded-md">
+                                                <AlignLeft size={10} />
+                                            </div>
+                                        )}
                                         {doc.faturado && (
                                             <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
                                                 <DollarSign size={10} />
