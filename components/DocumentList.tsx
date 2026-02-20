@@ -19,6 +19,7 @@ export const DocumentList: React.FC = () => {
     const [showMedicalDataModal, setShowMedicalDataModal] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<DocSeg | null>(null);
+    const [selectedPsicoGroup, setSelectedPsicoGroup] = useState<{ empresaId: number; nome_unidade: string; docs: DocSeg[] } | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     // Form Data
@@ -444,11 +445,47 @@ export const DocumentList: React.FC = () => {
     };
 
     const groupedDocs = useMemo(() => {
-        const groups: { [key: number]: DocSeg[] } = {};
-        documents.forEach(doc => {
+        const groups: { [key: number]: any[] } = {};
+
+        // Vamos manter um rastreamento dos grupos psicossociais por mês e empresa
+        const psicoTrack: { [mes: number]: { [empresa: number]: { count: number; docIndex: number; baseDoc: DocSeg; docs: DocSeg[] } } } = {};
+
+        documents.forEach((doc, index) => {
             const m = doc.mes;
             if (!groups[m]) groups[m] = [];
-            groups[m].push(doc);
+
+            if (doc.doc === 576 || doc.doc === 577) {
+                if (!psicoTrack[m]) psicoTrack[m] = {};
+
+                if (!psicoTrack[m][doc.empresa]) {
+                    // Primeiro que encontramos (que na verdade é o mais recente, pois a query original é order_by created_at desc)
+                    psicoTrack[m][doc.empresa] = {
+                        count: 1,
+                        docIndex: groups[m].length, // Posição que ele ficará no array deste mês
+                        baseDoc: doc,
+                        docs: [doc]
+                    };
+                    // Inserimos um objeto especial que servirá como o card agrupado
+                    groups[m].push({
+                        isPsicossocialGroup: true,
+                        empresaId: doc.empresa,
+                        nome_unidade: doc.unidades?.nome_unidade || 'Empresa desconhecida',
+                        count: 1,
+                        baseDoc: doc,
+                        docs: [doc]
+                    });
+                } else {
+                    // Já existe um card de grupo para esta empresa neste mês, apenas incrementamos o contador
+                    psicoTrack[m][doc.empresa].count += 1;
+                    psicoTrack[m][doc.empresa].docs.push(doc);
+                    // E atualizamos a propriedade 'count' do objeto já inserido no array
+                    groups[m][psicoTrack[m][doc.empresa].docIndex].count = psicoTrack[m][doc.empresa].count;
+                    groups[m][psicoTrack[m][doc.empresa].docIndex].docs = psicoTrack[m][doc.empresa].docs;
+                }
+            } else {
+                // Documentos normais
+                groups[m].push(doc);
+            }
         });
         return groups;
     }, [documents]);
@@ -525,17 +562,25 @@ export const DocumentList: React.FC = () => {
                 ) : (
                     <div className="space-y-12">
                         {filteredMonths.map(month => {
-                            const docsInMonth = groupedDocs[month].filter(d => {
-                                const matchesSearch =
-                                    d.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                    d.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
+                            const itemsInMonth = groupedDocs[month].filter(item => {
+                                if (item.isPsicossocialGroup) {
+                                    const matchesSearch =
+                                        item.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                        'psicossocial'.includes(searchTerm.toLowerCase());
+                                    return matchesSearch;
+                                }
 
-                                const matchesStatus = statusFilter === 'Todos' || d.status === statusFilter;
+                                const doc = item as DocSeg;
+                                const matchesSearch =
+                                    doc.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                    doc.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
+
+                                const matchesStatus = statusFilter === 'Todos' || doc.status === statusFilter;
 
                                 return matchesSearch && matchesStatus;
                             });
 
-                            if (docsInMonth.length === 0) return null;
+                            if (itemsInMonth.length === 0) return null;
 
                             return (
                                 <div key={month} className="animate-fade-in-up">
@@ -545,53 +590,85 @@ export const DocumentList: React.FC = () => {
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {docsInMonth.map(doc => (
-                                            <div key={doc.id} onClick={() => setSelectedDoc(doc)} className="cursor-pointer group">
-                                                <Card className={`hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ${doc.enviado ? 'ring-1 ring-green-100' : ''}`}>
-                                                    {doc.enviado && (
-                                                        <div className="absolute top-0 right-0 p-2.5 bg-green-500/10 rounded-bl-2xl">
-                                                            <CheckCircle2 size={16} className="text-green-600" />
-                                                        </div>
-                                                    )}
-                                                    <div className="flex justify-between items-start mb-4">
-                                                        <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-ios-blue group-hover:bg-ios-blue group-hover:text-white transition-colors duration-300">
-                                                            <FileIcon size={20} strokeWidth={2.5} />
-                                                        </div>
-                                                        <Badge status={doc.status} />
-                                                    </div>
-
-                                                    <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={doc.unidades?.nome_unidade}>
-                                                        {doc.unidades?.nome_unidade || 'Empresa desconhecida'}
-                                                    </h3>
-
-                                                    <div className="text-sm text-gray-500 font-medium mb-auto">
-                                                        {doc.procedimento?.nome || 'Sem nome'}
-                                                    </div>
-
-                                                    <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
-                                                        <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
-                                                            <Calendar size={12} />
-                                                            {new Date(doc.prazo).toLocaleDateString()}
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                            {doc.obs && (
-                                                                <div title="Possui observação" className="bg-yellow-50 text-yellow-600 p-1 rounded-md">
-                                                                    <AlignLeft size={10} />
+                                        {itemsInMonth.map((item, index) => {
+                                            if (item.isPsicossocialGroup) {
+                                                return (
+                                                    <div
+                                                        key={`psico-${item.empresaId}-${month}-${index}`}
+                                                        className="group cursor-pointer"
+                                                        onClick={() => setSelectedPsicoGroup({ empresaId: item.empresaId, nome_unidade: item.nome_unidade, docs: item.docs })}
+                                                    >
+                                                        <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ring-1 ring-purple-100 bg-purple-50/10">
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
+                                                                    <Activity size={20} strokeWidth={2.5} />
                                                                 </div>
-                                                            )}
-                                                            {doc.faturado && (
-                                                                <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
-                                                                    <DollarSign size={10} />
+                                                                <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">
+                                                                    {item.count} avaliações
                                                                 </div>
-                                                            )}
-                                                            <div className="text-gray-900 font-semibold">
-                                                                {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                                            </div>
+
+                                                            <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={item.nome_unidade}>
+                                                                {item.nome_unidade}
+                                                            </h3>
+
+                                                            <div className="text-sm text-purple-600 font-bold mb-auto">
+                                                                Psicossocial
+                                                            </div>
+                                                        </Card>
+                                                    </div>
+                                                );
+                                            }
+
+                                            const doc = item as DocSeg;
+                                            return (
+                                                <div key={doc.id} onClick={() => setSelectedDoc(doc)} className="cursor-pointer group">
+                                                    <Card className={`hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ${doc.enviado ? 'ring-1 ring-green-100' : ''}`}>
+                                                        {doc.enviado && (
+                                                            <div className="absolute top-0 right-0 p-2.5 bg-green-500/10 rounded-bl-2xl">
+                                                                <CheckCircle2 size={16} className="text-green-600" />
+                                                            </div>
+                                                        )}
+                                                        <div className="flex justify-between items-start mb-4">
+                                                            <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-ios-blue group-hover:bg-ios-blue group-hover:text-white transition-colors duration-300">
+                                                                <FileIcon size={20} strokeWidth={2.5} />
+                                                            </div>
+                                                            <Badge status={doc.status} />
+                                                        </div>
+
+                                                        <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={doc.unidades?.nome_unidade}>
+                                                            {doc.unidades?.nome_unidade || 'Empresa desconhecida'}
+                                                        </h3>
+
+                                                        <div className="text-sm text-gray-500 font-medium mb-auto">
+                                                            {doc.procedimento?.nome || 'Sem nome'}
+                                                        </div>
+
+                                                        <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
+                                                            <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
+                                                                <Calendar size={12} />
+                                                                {new Date(doc.prazo).toLocaleDateString()}
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                {doc.obs && (
+                                                                    <div title="Possui observação" className="bg-yellow-50 text-yellow-600 p-1 rounded-md">
+                                                                        <AlignLeft size={10} />
+                                                                    </div>
+                                                                )}
+                                                                {doc.faturado && (
+                                                                    <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
+                                                                        <DollarSign size={10} />
+                                                                    </div>
+                                                                )}
+                                                                <div className="text-gray-900 font-semibold">
+                                                                    {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                                                </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                </Card>
-                                            </div>
-                                        ))}
+                                                    </Card>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             );
@@ -886,6 +963,69 @@ export const DocumentList: React.FC = () => {
                         <div className="p-5 border-t border-gray-100 flex gap-3">
                             <Button variant="ghost" className="flex-1" onClick={() => setSelectedDoc(null)}>Fechar</Button>
                             <Button className="flex-1" onClick={handleUpdate}>Salvar Alterações</Button>
+                        </div>
+                    </Card>
+                </div>
+            )}
+
+            {/* Modal de Detalhes Psicossocial */}
+            {selectedPsicoGroup && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
+                    <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
+                        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-purple-50">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900 leading-tight">Avaliações Psicossociais</h2>
+                                <p className="text-purple-600 text-sm mt-1 font-semibold flex items-center gap-1.5">
+                                    <Building2 size={14} /> {selectedPsicoGroup.nome_unidade}
+                                </p>
+                            </div>
+                            <button onClick={() => setSelectedPsicoGroup(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                                <span className="text-2xl leading-none">&times;</span>
+                            </button>
+                        </div>
+                        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                            {selectedPsicoGroup.docs.map(doc => (
+                                <div key={doc.id} className="p-4 border border-gray-100 rounded-xl hover:shadow-md transition-shadow bg-white relative">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <h4 className="font-bold text-gray-800 flex items-center gap-2">
+                                                <Activity size={16} className="text-purple-500" />
+                                                {doc.procedimento?.nome}
+                                            </h4>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Recebido em: {new Date(doc.data_recebimento).toLocaleDateString()}
+                                            </p>
+                                        </div>
+                                        <Badge status={doc.status} />
+                                    </div>
+                                    <div className="flex items-center gap-4 text-xs font-medium text-gray-600 mt-4 border-t pt-3 border-gray-50">
+                                        <div className="flex items-center gap-1.5">
+                                            <Calendar size={12} className="text-gray-400" />
+                                            Prazo: {new Date(doc.prazo).toLocaleDateString()}
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <DollarSign size={12} className="text-green-500" />
+                                            {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                        </div>
+                                        {doc.obs && (
+                                            <div className="flex items-center gap-1.5 ml-auto text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded" title={doc.obs}>
+                                                <AlignLeft size={12} /> Obs
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="mt-4 flex justify-end">
+                                        <Button size="sm" variant="ghost" className="text-ios-blue text-xs hover:bg-blue-50" onClick={() => {
+                                            setSelectedPsicoGroup(null);
+                                            setSelectedDoc(doc);
+                                        }}>
+                                            Ver Detalhes Documento
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                            <Button variant="secondary" onClick={() => setSelectedPsicoGroup(null)}>Fechar</Button>
                         </div>
                     </Card>
                 </div>
