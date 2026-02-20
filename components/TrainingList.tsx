@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { Treinamento, MONTHS, Aluno, Procedimento } from '../types';
 import { Card, Badge, Button, Input, Select, GlassHeader, Toggle } from './UI';
-import { Plus, Search, Calendar, User, Clock, GraduationCap, CheckCircle, DollarSign, Laptop, FileText, Loader2, Download, AlertTriangle, Wallet, CheckCircle2 } from 'lucide-react';
+import { Plus, Search, Calendar, User, Clock, GraduationCap, CheckCircle, DollarSign, Laptop, FileText, Loader2, Download, AlertTriangle, Wallet, CheckCircle2, Building } from 'lucide-react';
 
 export const TrainingList: React.FC = () => {
     const [trainings, setTrainings] = useState<Treinamento[]>([]);
@@ -48,7 +48,7 @@ export const TrainingList: React.FC = () => {
             id, 
             nome, 
             cpf, 
-            unidades:empresa (nome_unidade, empresaid)
+            unidades:empresa (nome_unidade, empresaid, nome_unidade)
           ),
           procedimento:treinamento (id, nome, idcategoria)
         `)
@@ -453,6 +453,16 @@ export const TrainingList: React.FC = () => {
                                                         <User size={14} className="text-gray-400" />
                                                         <span className="truncate">{t.aluno_rel?.nome || 'Aluno S/N'}</span>
                                                     </div>
+                                                    {((t.aluno_rel as any)?.unidades) && (
+                                                        <div className="flex items-center gap-1.5 text-sm text-gray-500 font-medium mt-1">
+                                                            <Building size={14} className="text-gray-400" />
+                                                            <span className="truncate">
+                                                                {Array.isArray((t.aluno_rel as any).unidades)
+                                                                    ? ((t.aluno_rel as any).unidades[0]?.nome_unidade || (t.aluno_rel as any).unidades[0]?.nome_unidade)
+                                                                    : ((t.aluno_rel as any).unidades.nome_unidade || (t.aluno_rel as any).unidades.nome_unidade)}
+                                                            </span>
+                                                        </div>
+                                                    )}
 
                                                     <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
                                                         <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
