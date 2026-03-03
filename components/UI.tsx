@@ -196,7 +196,7 @@ export const Badge: React.FC<{ status: string }> = ({ status }) => {
     
     if (s.includes('pendente')) color = 'bg-yellow-50 text-yellow-700 border-yellow-100';
     if (s.includes('entregue') || s.includes('concluido') || s.includes('ok') || s.includes('presente')) color = 'bg-green-50 text-green-700 border-green-100';
-    if (s.includes('atrasado') || s.includes('cancelado') || s.includes('ausente')) color = 'bg-red-50 text-red-700 border-red-100';
+    if (s.includes('atrasado') || s.includes('cancelado') || s.includes('ausente') || s.includes('vencido')) color = 'bg-red-50 text-red-700 border-red-100';
 
     return (
         <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${color}`}>

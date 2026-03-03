@@ -9,6 +9,9 @@ export const DocumentList: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('Todos');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [showDatePicker, setShowDatePicker] = useState(false);
 
     // Modals state
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -258,22 +261,45 @@ export const DocumentList: React.FC = () => {
     // Calculate status counts
     const statusCounts = useMemo(() => {
         const counts = {
-            'Todos': documents.length,
+            'Todos': 0,
             'Pendente': 0,
             'Em Andamento': 0,
             'Concluido': 0,
-            'Entregue': 0
+            'Entregue': 0,
+            'Vencidos': 0
         };
 
-        documents.forEach(doc => {
-            if (doc.status === 'Pendente') counts['Pendente']++;
-            if (doc.status === 'Em Andamento') counts['Em Andamento']++;
-            if (doc.status === 'Concluido') counts['Concluido']++;
-            if (doc.status === 'Entregue') counts['Entregue']++;
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        // Filtra os documentos com base no termo de pesquisa e no intervalo de datas antes de contar
+        const filteredBySearchAndDate = documents.filter(doc => {
+            const matchesSearch = doc.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                doc.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
+
+            let matchesDate = true;
+            if (startDate) matchesDate = matchesDate && doc.prazo >= startDate;
+            if (endDate) matchesDate = matchesDate && doc.prazo <= endDate;
+
+            return matchesSearch && matchesDate;
+        });
+
+        counts['Todos'] = filteredBySearchAndDate.length;
+
+        filteredBySearchAndDate.forEach(doc => {
+            const isOverdue = doc.prazo < todayStr && doc.status !== 'Entregue' && doc.status !== 'Concluido';
+
+            if (isOverdue) {
+                counts['Vencidos']++;
+            } else {
+                if (doc.status === 'Pendente') counts['Pendente']++;
+                if (doc.status === 'Em Andamento') counts['Em Andamento']++;
+                if (doc.status === 'Concluido') counts['Concluido']++;
+                if (doc.status === 'Entregue') counts['Entregue']++;
+            }
         });
 
         return counts;
-    }, [documents]);
+    }, [documents, searchTerm, startDate, endDate]);
 
     const filterOptions = [
         { label: 'Todos', value: 'Todos' },
@@ -281,6 +307,7 @@ export const DocumentList: React.FC = () => {
         { label: 'Em Andamento', value: 'Em Andamento' },
         { label: 'Concluído', value: 'Concluido' },
         { label: 'Entregue', value: 'Entregue' },
+        { label: 'Vencidos', value: 'Vencidos' },
     ];
 
     const handleCreate = async () => {
@@ -515,8 +542,8 @@ export const DocumentList: React.FC = () => {
             />
 
             <div className="px-8">
-                <div className="flex flex-col gap-6 mb-8">
-                    <div className="relative w-full">
+                <div className="flex items-center gap-3 mb-8">
+                    <div className="relative flex-1">
                         <Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
                         <input
                             type="text"
@@ -527,155 +554,253 @@ export const DocumentList: React.FC = () => {
                         />
                     </div>
 
-                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2">
-                        {filterOptions.map(opt => (
-                            <button
-                                key={opt.value}
-                                onClick={() => setStatusFilter(opt.value)}
-                                className={`
-                            flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 border whitespace-nowrap
-                            ${statusFilter === opt.value
-                                        ? 'bg-ios-blue border-ios-blue text-white shadow-lg shadow-blue-500/30 scale-105'
-                                        : 'bg-white border-white hover:border-gray-200 text-gray-500 hover:bg-gray-50'
-                                    }
-                        `}
-                            >
-                                {opt.label}
-                                <span className={`
-                            flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full text-[10px] font-bold
-                            ${statusFilter === opt.value
-                                        ? 'bg-white/20 text-white'
-                                        : 'bg-gray-100 text-gray-400'
-                                    }
-                        `}>
-                                    {statusCounts[opt.value as keyof typeof statusCounts] || 0}
-                                </span>
-                            </button>
-                        ))}
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowDatePicker(!showDatePicker)}
+                            className={`p-3.5 rounded-2xl shadow-sm transition-all duration-300 flex items-center justify-center h-[52px] w-[52px] ${showDatePicker || startDate || endDate ? 'bg-ios-blue text-white' : 'bg-white text-gray-400 hover:text-gray-600'}`}
+                            title="Filtrar por data"
+                        >
+                            <Calendar size={20} />
+                            {(startDate || endDate) && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white"></span>
+                            )}
+                        </button>
+
+                        {showDatePicker && (
+                            <div className="absolute right-0 top-full mt-2 z-50 p-4 bg-white/95 backdrop-blur-xl border border-white/40 rounded-2xl shadow-ios-float animate-scale-in flex flex-col gap-4 w-72">
+                                <div className="flex items-center justify-between mb-1">
+                                    <h4 className="text-sm font-bold text-gray-800">Filtrar por Prazo</h4>
+                                    {(startDate || endDate) && (
+                                        <button
+                                            onClick={() => { setStartDate(''); setEndDate(''); }}
+                                            className="text-[10px] uppercase font-bold text-red-500 hover:text-red-600 transition-colors"
+                                        >
+                                            Limpar
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="space-y-3">
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-tight ml-1">De:</label>
+                                        <input
+                                            type="date"
+                                            className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-ios-blue/20"
+                                            value={startDate}
+                                            onChange={(e) => setStartDate(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-[10px] font-bold text-gray-400 uppercase tracking-tight ml-1">Até:</label>
+                                        <input
+                                            type="date"
+                                            className="w-full bg-gray-50 border border-gray-100 rounded-xl px-3 py-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-ios-blue/20"
+                                            value={endDate}
+                                            onChange={(e) => setEndDate(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => setShowDatePicker(false)}
+                                    className="w-full bg-ios-blue text-white py-2 rounded-xl text-xs font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+                                >
+                                    Aplicar Filtro
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
 
-                {loading ? (
-                    <div className="flex items-center justify-center h-64">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ios-blue"></div>
-                    </div>
-                ) : (
-                    <div className="space-y-12">
-                        {filteredMonths.map(month => {
-                            const itemsInMonth = groupedDocs[month].filter(item => {
-                                if (item.isPsicossocialGroup) {
-                                    const matchesSearch =
-                                        item.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                        'psicossocial'.includes(searchTerm.toLowerCase());
-                                    return matchesSearch;
+                <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2 mb-10">
+                    {filterOptions.map(opt => (
+                        <button
+                            key={opt.value}
+                            onClick={() => setStatusFilter(opt.value)}
+                            className={`
+                            flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 border whitespace-nowrap
+                            ${statusFilter === opt.value
+                                    ? (opt.value === 'Vencidos'
+                                        ? 'bg-red-500 border-red-500 text-white shadow-lg shadow-red-500/30 scale-105'
+                                        : 'bg-ios-blue border-ios-blue text-white shadow-lg shadow-blue-500/30 scale-105')
+                                    : 'bg-white border-white hover:border-gray-200 text-gray-500 hover:bg-gray-50'
+                                }
+                        `}
+                        >
+                            {opt.label}
+                            <span className={`
+                            flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full text-[10px] font-bold
+                            ${statusFilter === opt.value
+                                    ? (opt.value === 'Vencidos' ? 'bg-white/30 text-white' : 'bg-white/20 text-white')
+                                    : 'bg-gray-100 text-gray-400'
+                                }
+                        `}>
+                                {statusCounts[opt.value as keyof typeof statusCounts] || 0}
+                            </span>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            {loading ? (
+                <div className="flex items-center justify-center h-64">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ios-blue"></div>
+                </div>
+            ) : (
+                <div className="space-y-12">
+                    {filteredMonths.map(month => {
+                        const todayStr = new Date().toISOString().split('T')[0];
+                        const itemsInMonth = groupedDocs[month].filter(item => {
+                            if (item.isPsicossocialGroup) {
+                                const matchesSearch =
+                                    item.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                    'psicossocial'.includes(searchTerm.toLowerCase());
+
+                                let matchesDate = true;
+                                if (startDate) matchesDate = matchesDate && item.baseDoc.prazo >= startDate;
+                                if (endDate) matchesDate = matchesDate && item.baseDoc.prazo <= endDate;
+
+                                if (statusFilter === 'Todos') return matchesSearch && matchesDate;
+
+                                if (statusFilter === 'Vencidos') {
+                                    const hasOverdue = (item.docs as DocSeg[]).some(d => d.prazo < todayStr && d.status !== 'Entregue' && d.status !== 'Concluido');
+                                    return matchesSearch && hasOverdue && matchesDate;
                                 }
 
-                                const doc = item as DocSeg;
-                                const matchesSearch =
-                                    doc.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                    doc.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
+                                const hasMatchingStatus = (item.docs as DocSeg[]).some(d => {
+                                    const isOverdue = d.prazo < todayStr && d.status !== 'Entregue' && d.status !== 'Concluido';
+                                    return !isOverdue && d.status === statusFilter;
+                                });
 
-                                const matchesStatus = statusFilter === 'Todos' || doc.status === statusFilter;
+                                return matchesSearch && hasMatchingStatus && matchesDate;
+                            }
 
-                                return matchesSearch && matchesStatus;
-                            });
+                            const doc = item as DocSeg;
+                            const isOverdue = doc.prazo < todayStr && doc.status !== 'Entregue' && doc.status !== 'Concluido';
 
-                            if (itemsInMonth.length === 0) return null;
+                            const matchesSearch =
+                                doc.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                doc.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
 
-                            return (
-                                <div key={month} className="animate-fade-in-up">
-                                    <div className="flex items-center gap-3 mb-6 ml-2">
-                                        <div className="w-1.5 h-6 bg-ios-blue rounded-full"></div>
-                                        <h2 className="text-xl font-bold text-gray-800">{MONTHS[month - 1]}</h2>
-                                    </div>
+                            let matchesDate = true;
+                            if (startDate) matchesDate = matchesDate && doc.prazo >= startDate;
+                            if (endDate) matchesDate = matchesDate && doc.prazo <= endDate;
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {itemsInMonth.map((item, index) => {
-                                            if (item.isPsicossocialGroup) {
-                                                return (
-                                                    <div
-                                                        key={`psico-${item.empresaId}-${month}-${index}`}
-                                                        className="group cursor-pointer"
-                                                        onClick={() => setSelectedPsicoGroup({ empresaId: item.empresaId, nome_unidade: item.nome_unidade, docs: item.docs })}
-                                                    >
-                                                        <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ring-1 ring-purple-100 bg-purple-50/10">
-                                                            <div className="flex justify-between items-start mb-4">
-                                                                <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
-                                                                    <Activity size={20} strokeWidth={2.5} />
-                                                                </div>
+                            const matchesStatus = statusFilter === 'Todos' ||
+                                (statusFilter === 'Vencidos' ? isOverdue : (!isOverdue && doc.status === statusFilter));
+
+                            return matchesSearch && matchesStatus && matchesDate;
+                        });
+
+                        if (itemsInMonth.length === 0) return null;
+
+                        return (
+                            <div key={month} className="animate-fade-in-up">
+                                <div className="flex items-center gap-3 mb-6 ml-2">
+                                    <div className="w-1.5 h-6 bg-ios-blue rounded-full"></div>
+                                    <h2 className="text-xl font-bold text-gray-800">{MONTHS[month - 1]}</h2>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                    {itemsInMonth.map((item, index) => {
+                                        if (item.isPsicossocialGroup) {
+                                            return (
+                                                <div
+                                                    key={`psico-${item.empresaId}-${month}-${index}`}
+                                                    className="group cursor-pointer"
+                                                    onClick={() => setSelectedPsicoGroup({ empresaId: item.empresaId, nome_unidade: item.nome_unidade, docs: item.docs })}
+                                                >
+                                                    <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ring-1 ring-purple-100 bg-purple-50/10">
+                                                        <div className="flex justify-between items-start mb-4">
+                                                            <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
+                                                                <Activity size={20} strokeWidth={2.5} />
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                {(item.docs as DocSeg[]).some(d => d.prazo < new Date().toISOString().split('T')[0] && d.status !== 'Entregue' && d.status !== 'Concluido') && (
+                                                                    <Badge status="Vencido" />
+                                                                )}
                                                                 <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">
                                                                     {item.count} avaliações
                                                                 </div>
                                                             </div>
-
-                                                            <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={item.nome_unidade}>
-                                                                {item.nome_unidade}
-                                                            </h3>
-
-                                                            <div className="text-sm text-purple-600 font-bold mb-auto">
-                                                                Psicossocial
-                                                            </div>
-                                                        </Card>
-                                                    </div>
-                                                );
-                                            }
-
-                                            const doc = item as DocSeg;
-                                            return (
-                                                <div key={doc.id} onClick={() => setSelectedDoc(doc)} className="cursor-pointer group">
-                                                    <Card className={`hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ${doc.enviado ? 'ring-1 ring-green-100' : ''}`}>
-                                                        {doc.enviado && (
-                                                            <div className="absolute top-0 right-0 p-2.5 bg-green-500/10 rounded-bl-2xl">
-                                                                <CheckCircle2 size={16} className="text-green-600" />
-                                                            </div>
-                                                        )}
-                                                        <div className="flex justify-between items-start mb-4">
-                                                            <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-ios-blue group-hover:bg-ios-blue group-hover:text-white transition-colors duration-300">
-                                                                <FileIcon size={20} strokeWidth={2.5} />
-                                                            </div>
-                                                            <Badge status={doc.status} />
                                                         </div>
 
-                                                        <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={doc.unidades?.nome_unidade}>
-                                                            {doc.unidades?.nome_unidade || 'Empresa desconhecida'}
+                                                        <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={item.nome_unidade}>
+                                                            {item.nome_unidade}
                                                         </h3>
 
-                                                        <div className="text-sm text-gray-500 font-medium mb-auto">
-                                                            {doc.procedimento?.nome || 'Sem nome'}
-                                                        </div>
-
-                                                        <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
-                                                            <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
-                                                                <Calendar size={12} />
-                                                                {new Date(doc.prazo).toLocaleDateString()}
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                {doc.obs && (
-                                                                    <div title="Possui observação" className="bg-yellow-50 text-yellow-600 p-1 rounded-md">
-                                                                        <AlignLeft size={10} />
-                                                                    </div>
-                                                                )}
-                                                                {doc.faturado && (
-                                                                    <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
-                                                                        <DollarSign size={10} />
-                                                                    </div>
-                                                                )}
-                                                                <div className="text-gray-900 font-semibold">
-                                                                    {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
-                                                                </div>
-                                                            </div>
+                                                        <div className="text-sm text-purple-600 font-bold mb-auto">
+                                                            Psicossocial
                                                         </div>
                                                     </Card>
                                                 </div>
                                             );
-                                        })}
-                                    </div>
+                                        }
+
+                                        const doc = item as DocSeg;
+                                        return (
+                                            <div key={doc.id} onClick={() => setSelectedDoc(doc)} className="cursor-pointer group">
+                                                <Card className={`hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ${doc.enviado ? 'ring-1 ring-green-100' : ''}`}>
+                                                    {doc.enviado && (
+                                                        <div className="absolute top-0 right-0 p-2.5 bg-green-500/10 rounded-bl-2xl">
+                                                            <CheckCircle2 size={16} className="text-green-600" />
+                                                        </div>
+                                                    )}
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-ios-blue group-hover:bg-ios-blue group-hover:text-white transition-colors duration-300">
+                                                            <FileIcon size={20} strokeWidth={2.5} />
+                                                        </div>
+                                                        <Badge status={(() => {
+                                                            const today = new Date().toISOString().split('T')[0];
+                                                            if (doc.prazo < today && doc.status !== 'Entregue' && doc.status !== 'Concluido') {
+                                                                return 'Vencido';
+                                                            }
+                                                            return doc.status;
+                                                        })()} />
+                                                    </div>
+
+                                                    <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={doc.unidades?.nome_unidade}>
+                                                        {doc.unidades?.nome_unidade || 'Empresa desconhecida'}
+                                                    </h3>
+
+                                                    <div className="text-sm text-gray-500 font-medium mb-auto">
+                                                        {doc.procedimento?.nome || 'Sem nome'}
+                                                    </div>
+
+                                                    <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
+                                                        <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
+                                                            <Calendar size={12} />
+                                                            {(() => {
+                                                                const [year, month, day] = doc.prazo.split('-');
+                                                                return `${day}/${month}/${year}`;
+                                                            })()}
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {doc.obs && (
+                                                                <div title="Possui observação" className="bg-yellow-50 text-yellow-600 p-1 rounded-md">
+                                                                    <AlignLeft size={10} />
+                                                                </div>
+                                                            )}
+                                                            {doc.faturado && (
+                                                                <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
+                                                                    <DollarSign size={10} />
+                                                                </div>
+                                                            )}
+                                                            <div className="text-gray-900 font-semibold">
+                                                                {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </Card>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
 
             {/* Create Modal */}
             {showCreateModal && (
@@ -794,181 +919,182 @@ export const DocumentList: React.FC = () => {
             )}
 
             {/* Edit Modal */}
-            {selectedDoc && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
-                    <Card className="w-full max-w-lg overflow-hidden animate-scale-in p-0 shadow-2xl">
-                        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-900 leading-tight">{selectedDoc.unidades?.nome_unidade}</h2>
-                                <p className="text-gray-500 text-sm mt-1 flex items-center gap-1.5">
-                                    <FileIcon size={12} /> {selectedDoc.procedimento?.nome}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={handleDelete}
-                                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-                                    title="Excluir Documento"
-                                >
-                                    <Trash2 size={20} />
-                                </button>
-                                <button onClick={() => setSelectedDoc(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
-                                    <span className="text-2xl leading-none">&times;</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-                            <div className="grid grid-cols-2 gap-4">
-                                <Select
-                                    label="Status Atual"
-                                    value={editData.status}
-                                    className="font-medium"
-                                    onChange={e => setEditData({ ...editData, status: e.target.value })}
-                                >
-                                    <option value="Pendente">Pendente</option>
-                                    <option value="Em Andamento">Em Andamento</option>
-                                    <option value="Concluido">Concluído</option>
-                                    <option value="Entregue">Entregue</option>
-                                </Select>
-                                <Input
-                                    label="Valor (R$)"
-                                    type="number"
-                                    step="0.01"
-                                    icon={<DollarSign size={16} />}
-                                    value={editData.valor || 0}
-                                    onChange={e => setEditData({ ...editData, valor: parseFloat(e.target.value) })}
-                                />
+            {
+                selectedDoc && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
+                        <Card className="w-full max-w-lg overflow-hidden animate-scale-in p-0 shadow-2xl">
+                            <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
+                                <div>
+                                    <h2 className="text-xl font-bold text-gray-900 leading-tight">{selectedDoc.unidades?.nome_unidade}</h2>
+                                    <p className="text-gray-500 text-sm mt-1 flex items-center gap-1.5">
+                                        <FileIcon size={12} /> {selectedDoc.procedimento?.nome}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleDelete}
+                                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                                        title="Excluir Documento"
+                                    >
+                                        <Trash2 size={20} />
+                                    </button>
+                                    <button onClick={() => setSelectedDoc(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                                        <span className="text-2xl leading-none">&times;</span>
+                                    </button>
+                                </div>
                             </div>
 
-                            <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100 space-y-4">
-                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Datas</h3>
+                            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
                                 <div className="grid grid-cols-2 gap-4">
+                                    <Select
+                                        label="Status Atual"
+                                        value={editData.status}
+                                        className="font-medium"
+                                        onChange={e => setEditData({ ...editData, status: e.target.value })}
+                                    >
+                                        <option value="Pendente">Pendente</option>
+                                        <option value="Em Andamento">Em Andamento</option>
+                                        <option value="Concluido">Concluído</option>
+                                        <option value="Entregue">Entregue</option>
+                                    </Select>
                                     <Input
-                                        label="Recebimento"
-                                        type="date"
-                                        className="bg-white"
-                                        value={editData.data_recebimento ? new Date(editData.data_recebimento).toISOString().split('T')[0] : ''}
-                                        onChange={e => setEditData({ ...editData, data_recebimento: e.target.value })}
-                                    />
-                                    <Input
-                                        label="Prazo"
-                                        type="date"
-                                        className="bg-white"
-                                        value={editData.prazo ? new Date(editData.prazo).toISOString().split('T')[0] : ''}
-                                        onChange={e => setEditData({ ...editData, prazo: e.target.value })}
+                                        label="Valor (R$)"
+                                        type="number"
+                                        step="0.01"
+                                        icon={<DollarSign size={16} />}
+                                        value={editData.valor || 0}
+                                        onChange={e => setEditData({ ...editData, valor: parseFloat(e.target.value) })}
                                     />
                                 </div>
 
-                                <div className="pt-2 border-t border-gray-200/50">
-                                    <Input
-                                        label="Data de Entrega"
-                                        type="date"
-                                        className="bg-white"
-                                        value={editData.data_entrega ? new Date(editData.data_entrega).toISOString().split('T')[0] : ''}
-                                        onChange={e => setEditData({ ...editData, data_entrega: e.target.value })}
-                                    />
+                                <div className="bg-gray-50 p-5 rounded-2xl border border-gray-100 space-y-4">
+                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Datas</h3>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <Input
+                                            label="Recebimento"
+                                            type="date"
+                                            className="bg-white"
+                                            value={editData.data_recebimento ? new Date(editData.data_recebimento).toISOString().split('T')[0] : ''}
+                                            onChange={e => setEditData({ ...editData, data_recebimento: e.target.value })}
+                                        />
+                                        <Input
+                                            label="Prazo"
+                                            type="date"
+                                            className="bg-white"
+                                            value={editData.prazo ? new Date(editData.prazo).toISOString().split('T')[0] : ''}
+                                            onChange={e => setEditData({ ...editData, prazo: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div className="pt-2 border-t border-gray-200/50">
+                                        <Input
+                                            label="Data de Entrega"
+                                            type="date"
+                                            className="bg-white"
+                                            value={editData.data_entrega ? new Date(editData.data_entrega).toISOString().split('T')[0] : ''}
+                                            onChange={e => setEditData({ ...editData, data_entrega: e.target.value })}
+                                        />
+                                    </div>
                                 </div>
-                            </div>
 
-                            {/* Billing Section - In Edit Modal */}
-                            <div className={`p-5 rounded-2xl border transition-all duration-300 ${editData.faturado ? 'bg-blue-50/50 border-blue-200' : 'bg-gray-50 border-gray-100'}`}>
-                                <div className="flex items-center justify-between mb-4">
-                                    <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${editData.faturado ? 'text-ios-blue' : 'text-gray-400'}`}>
-                                        <Wallet size={12} /> Faturamento
-                                    </h3>
-                                    <Toggle
-                                        label={editData.faturado ? "Faturado" : "Gerar Faturamento"}
-                                        checked={editData.faturado || false}
-                                        onChange={(val) => {
-                                            if (selectedDoc.faturado && !val) {
-                                                alert("Não é possível cancelar o faturamento por aqui. Contate o suporte.");
-                                                return;
-                                            }
-                                            setEditData({ ...editData, faturado: val })
-                                        }}
-                                    />
-                                </div>
+                                {/* Billing Section - In Edit Modal */}
+                                <div className={`p-5 rounded-2xl border transition-all duration-300 ${editData.faturado ? 'bg-blue-50/50 border-blue-200' : 'bg-gray-50 border-gray-100'}`}>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${editData.faturado ? 'text-ios-blue' : 'text-gray-400'}`}>
+                                            <Wallet size={12} /> Faturamento
+                                        </h3>
+                                        <Toggle
+                                            label={editData.faturado ? "Faturado" : "Gerar Faturamento"}
+                                            checked={editData.faturado || false}
+                                            onChange={(val) => {
+                                                if (selectedDoc.faturado && !val) {
+                                                    alert("Não é possível cancelar o faturamento por aqui. Contate o suporte.");
+                                                    return;
+                                                }
+                                                setEditData({ ...editData, faturado: val })
+                                            }}
+                                        />
+                                    </div>
 
-                                {editData.faturado && !selectedDoc.faturado && (
-                                    <div className="animate-fade-in space-y-4 pt-2">
-                                        <div>
-                                            <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-2 block">Empresa Responsável</label>
-                                            <div className="flex gap-2">
-                                                {['Gama Medicina', 'Gama Soluções'].map(emp => (
-                                                    <label key={emp} className={`flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border shadow-sm flex-1 justify-center transition-all ${editData.empresaResp === emp ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
-                                                        <input
-                                                            type="radio"
-                                                            name="empresaRespEdit"
-                                                            className="hidden"
-                                                            checked={editData.empresaResp === emp}
-                                                            onChange={() => setEditData({ ...editData, empresaResp: emp })}
-                                                        />
-                                                        <span className={`text-xs font-medium ${editData.empresaResp === emp ? 'text-ios-blue' : 'text-gray-600'}`}>{emp}</span>
-                                                    </label>
-                                                ))}
-                                            </div>
-                                        </div>
-
-                                        <div className="flex items-center gap-4">
-                                            <Toggle
-                                                label="Parcelado?"
-                                                checked={editData.isParcelado || false}
-                                                onChange={(val) => setEditData({ ...editData, isParcelado: val })}
-                                            />
-                                            {editData.isParcelado && (
-                                                <div className="flex-1 animate-fade-in">
-                                                    <Input
-                                                        label="Qtd. Parcelas"
-                                                        type="number"
-                                                        min="2"
-                                                        max="48"
-                                                        className="bg-white border-blue-200 focus:border-blue-400 mb-0"
-                                                        value={editData.qntParcelas}
-                                                        onChange={e => setEditData({ ...editData, qntParcelas: parseInt(e.target.value) })}
-                                                    />
+                                    {editData.faturado && !selectedDoc.faturado && (
+                                        <div className="animate-fade-in space-y-4 pt-2">
+                                            <div>
+                                                <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-2 block">Empresa Responsável</label>
+                                                <div className="flex gap-2">
+                                                    {['Gama Medicina', 'Gama Soluções'].map(emp => (
+                                                        <label key={emp} className={`flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border shadow-sm flex-1 justify-center transition-all ${editData.empresaResp === emp ? 'border-ios-blue ring-1 ring-ios-blue' : 'border-blue-100 hover:bg-blue-50'}`}>
+                                                            <input
+                                                                type="radio"
+                                                                name="empresaRespEdit"
+                                                                className="hidden"
+                                                                checked={editData.empresaResp === emp}
+                                                                onChange={() => setEditData({ ...editData, empresaResp: emp })}
+                                                            />
+                                                            <span className={`text-xs font-medium ${editData.empresaResp === emp ? 'text-ios-blue' : 'text-gray-600'}`}>{emp}</span>
+                                                        </label>
+                                                    ))}
                                                 </div>
-                                            )}
-                                        </div>
-                                        <p className="text-[10px] text-blue-500 bg-blue-100/50 p-2 rounded-lg">
-                                            Ao salvar, um registro financeiro será criado automaticamente.
-                                        </p>
-                                    </div>
-                                )}
-                                {selectedDoc.faturado && (
-                                    <div className="text-xs text-green-600 font-medium flex items-center gap-2 bg-green-50 p-2 rounded-lg">
-                                        <CheckCircle2 size={12} /> Financeiro já gerado para este documento.
-                                    </div>
-                                )}
-                            </div>
+                                            </div>
 
-                            <div className="w-full">
-                                <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-1.5 flex items-center gap-1"><AlignLeft size={10} /> Observações</label>
-                                <textarea
-                                    className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-gray-900 text-sm placeholder-gray-400 focus:bg-white focus:border-ios-blue focus:ring-4 focus:ring-blue-500/10 transition-all outline-none resize-none h-24"
-                                    placeholder="Observações sobre o documento..."
-                                    value={editData.obs || ''}
-                                    onChange={e => setEditData({ ...editData, obs: e.target.value })}
+                                            <div className="flex items-center gap-4">
+                                                <Toggle
+                                                    label="Parcelado?"
+                                                    checked={editData.isParcelado || false}
+                                                    onChange={(val) => setEditData({ ...editData, isParcelado: val })}
+                                                />
+                                                {editData.isParcelado && (
+                                                    <div className="flex-1 animate-fade-in">
+                                                        <Input
+                                                            label="Qtd. Parcelas"
+                                                            type="number"
+                                                            min="2"
+                                                            max="48"
+                                                            className="bg-white border-blue-200 focus:border-blue-400 mb-0"
+                                                            value={editData.qntParcelas}
+                                                            onChange={e => setEditData({ ...editData, qntParcelas: parseInt(e.target.value) })}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <p className="text-[10px] text-blue-500 bg-blue-100/50 p-2 rounded-lg">
+                                                Ao salvar, um registro financeiro será criado automaticamente.
+                                            </p>
+                                        </div>
+                                    )}
+                                    {selectedDoc.faturado && (
+                                        <div className="text-xs text-green-600 font-medium flex items-center gap-2 bg-green-50 p-2 rounded-lg">
+                                            <CheckCircle2 size={12} /> Financeiro já gerado para este documento.
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="w-full">
+                                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 ml-1 mb-1.5 flex items-center gap-1"><AlignLeft size={10} /> Observações</label>
+                                    <textarea
+                                        className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-gray-900 text-sm placeholder-gray-400 focus:bg-white focus:border-ios-blue focus:ring-4 focus:ring-blue-500/10 transition-all outline-none resize-none h-24"
+                                        placeholder="Observações sobre o documento..."
+                                        value={editData.obs || ''}
+                                        onChange={e => setEditData({ ...editData, obs: e.target.value })}
+                                    />
+                                </div>
+
+                                <Toggle
+                                    label="Documento Enviado"
+                                    description="Marque se o documento já foi enviado ao cliente."
+                                    checked={editData.enviado || false}
+                                    onChange={(val) => setEditData({ ...editData, enviado: val })}
                                 />
                             </div>
 
-                            <Toggle
-                                label="Documento Enviado"
-                                description="Marque se o documento já foi enviado ao cliente."
-                                checked={editData.enviado || false}
-                                onChange={(val) => setEditData({ ...editData, enviado: val })}
-                            />
-                        </div>
+                            <div className="p-5 border-t border-gray-100 flex gap-3">
+                                <Button variant="ghost" className="flex-1" onClick={() => setSelectedDoc(null)}>Fechar</Button>
+                                <Button className="flex-1" onClick={handleUpdate}>Salvar Alterações</Button>
+                            </div>
+                        </Card>
+                    </div>
+                )
+            }
 
-                        <div className="p-5 border-t border-gray-100 flex gap-3">
-                            <Button variant="ghost" className="flex-1" onClick={() => setSelectedDoc(null)}>Fechar</Button>
-                            <Button className="flex-1" onClick={handleUpdate}>Salvar Alterações</Button>
-                        </div>
-                    </Card>
-                </div>
-            )}
-
-            {/* Modal de Detalhes Psicossocial */}
             {selectedPsicoGroup && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
@@ -1031,7 +1157,6 @@ export const DocumentList: React.FC = () => {
                 </div>
             )}
 
-            {/* Generate Document Modal */}
             {showGenerateModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-4xl overflow-hidden animate-scale-in p-0 shadow-2xl relative">
@@ -1092,7 +1217,6 @@ export const DocumentList: React.FC = () => {
                 </div>
             )}
 
-            {/* PCMSO Generation Modal */}
             {showPcmsoModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
@@ -1138,7 +1262,6 @@ export const DocumentList: React.FC = () => {
                 </div>
             )}
 
-            {/* Company Data Form Modal */}
             {showCompanyDataModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden animate-scale-in p-0 shadow-2xl relative">
@@ -1415,7 +1538,6 @@ export const DocumentList: React.FC = () => {
                 </div>
             )}
 
-            {/* PCMSO Configuration Modal */}
             {showPcmsoConfigModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-lg overflow-hidden animate-scale-in p-0 shadow-2xl rounded-[40px]">
@@ -1536,7 +1658,6 @@ export const DocumentList: React.FC = () => {
                 </div>
             )}
 
-            {/* Medical Data Modal */}
             {showMedicalDataModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden animate-scale-in p-0 shadow-2xl">
@@ -1717,7 +1838,6 @@ export const DocumentList: React.FC = () => {
                 </div>
             )}
 
-            {/* Schedule of Actions Modal */}
             {showScheduleModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                     <Card className="w-full max-w-2xl h-[90vh] flex flex-col overflow-hidden animate-scale-in p-0 shadow-2xl rounded-[40px]">
