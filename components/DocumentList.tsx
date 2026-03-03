@@ -475,7 +475,7 @@ export const DocumentList: React.FC = () => {
         const groups: { [key: number]: any[] } = {};
 
         // Vamos manter um rastreamento dos grupos psicossociais por mês e empresa
-        const psicoTrack: { [mes: number]: { [empresa: number]: { count: number; docIndex: number; baseDoc: DocSeg; docs: DocSeg[] } } } = {};
+        const psicoTrack: { [mes: number]: { [empresa: number]: { count: number; deliveredCount: number; docIndex: number; baseDoc: DocSeg; docs: DocSeg[] } } } = {};
 
         documents.forEach((doc, index) => {
             const m = doc.mes;
@@ -488,6 +488,7 @@ export const DocumentList: React.FC = () => {
                     // Primeiro que encontramos (que na verdade é o mais recente, pois a query original é order_by created_at desc)
                     psicoTrack[m][doc.empresa] = {
                         count: 1,
+                        deliveredCount: doc.status === 'Entregue' ? 1 : 0,
                         docIndex: groups[m].length, // Posição que ele ficará no array deste mês
                         baseDoc: doc,
                         docs: [doc]
@@ -498,15 +499,18 @@ export const DocumentList: React.FC = () => {
                         empresaId: doc.empresa,
                         nome_unidade: doc.unidades?.nome_unidade || 'Empresa desconhecida',
                         count: 1,
+                        deliveredCount: doc.status === 'Entregue' ? 1 : 0,
                         baseDoc: doc,
                         docs: [doc]
                     });
                 } else {
                     // Já existe um card de grupo para esta empresa neste mês, apenas incrementamos o contador
                     psicoTrack[m][doc.empresa].count += 1;
+                    if (doc.status === 'Entregue') psicoTrack[m][doc.empresa].deliveredCount += 1;
                     psicoTrack[m][doc.empresa].docs.push(doc);
                     // E atualizamos a propriedade 'count' do objeto já inserido no array
                     groups[m][psicoTrack[m][doc.empresa].docIndex].count = psicoTrack[m][doc.empresa].count;
+                    groups[m][psicoTrack[m][doc.empresa].docIndex].deliveredCount = psicoTrack[m][doc.empresa].deliveredCount;
                     groups[m][psicoTrack[m][doc.empresa].docIndex].docs = psicoTrack[m][doc.empresa].docs;
                 }
             } else {
@@ -720,7 +724,7 @@ export const DocumentList: React.FC = () => {
                                                                     <Badge status="Vencido" />
                                                                 )}
                                                                 <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">
-                                                                    {item.count} avaliações
+                                                                    {item.deliveredCount}/{item.count} avaliações
                                                                 </div>
                                                             </div>
                                                         </div>
