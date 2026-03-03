@@ -12,6 +12,7 @@ export const DocumentList: React.FC = () => {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
     const [showDatePicker, setShowDatePicker] = useState(false);
+    const [viewMode, setViewMode] = useState<'normal' | 'empresarial'>('normal');
 
     // Modals state
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -23,6 +24,7 @@ export const DocumentList: React.FC = () => {
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<DocSeg | null>(null);
     const [selectedPsicoGroup, setSelectedPsicoGroup] = useState<{ empresaId: number; nome_unidade: string; docs: DocSeg[] } | null>(null);
+    const [selectedCompanyDocs, setSelectedCompanyDocs] = useState<{ nome_unidade: string; docs: DocSeg[] } | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     // Form Data
@@ -258,9 +260,81 @@ export const DocumentList: React.FC = () => {
         }
     };
 
+    const companyViewData = useMemo(() => {
+        const groups: {
+            [empresaId: number]: {
+                empresaId: number,
+                nome_unidade: string,
+                total: number,
+                feitos: number,
+                status: string,
+                docs: DocSeg[]
+            }
+        } = {};
+
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        // Filter search & date first
+        documents.forEach(doc => {
+            const matchesSearch = doc.unidades?.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                doc.procedimento?.nome.toLowerCase().includes(searchTerm.toLowerCase());
+
+            let matchesDate = true;
+            if (startDate) matchesDate = matchesDate && doc.prazo >= startDate;
+            if (endDate) matchesDate = matchesDate && doc.prazo <= endDate;
+
+            if (matchesSearch && matchesDate) {
+                if (!groups[doc.empresa]) {
+                    groups[doc.empresa] = {
+                        empresaId: doc.empresa,
+                        nome_unidade: doc.unidades?.nome_unidade || 'Empresa desconhecida',
+                        total: 0,
+                        feitos: 0,
+                        status: '',
+                        docs: []
+                    };
+                }
+                groups[doc.empresa].docs.push(doc);
+                groups[doc.empresa].total++;
+                if (doc.status === 'Entregue' || doc.status === 'Concluido') {
+                    groups[doc.empresa].feitos++;
+                }
+            }
+        });
+
+        return Object.values(groups).map(company => {
+            let hasVencido = false;
+            let countEntregue = 0;
+            let countConcluido = 0;
+            let countFeito = 0;
+
+            company.docs.forEach(d => {
+                const isVencido = d.prazo < todayStr && d.status !== 'Entregue' && d.status !== 'Concluido';
+                if (isVencido) hasVencido = true;
+                if (d.status === 'Entregue') countEntregue++;
+                if (d.status === 'Concluido') countConcluido++;
+                if (d.status === 'Entregue' || d.status === 'Concluido') countFeito++;
+            });
+
+            if (hasVencido) {
+                company.status = 'Vencidos';
+            } else if (countEntregue === company.total && company.total > 0) {
+                company.status = 'Entregue';
+            } else if (countConcluido > 0) {
+                company.status = 'Concluido';
+            } else if (countFeito >= 1 && company.total > 1) {
+                company.status = 'Em Andamento';
+            } else {
+                company.status = 'Pendente';
+            }
+
+            return company;
+        }).sort((a, b) => a.nome_unidade.localeCompare(b.nome_unidade));
+    }, [documents, searchTerm, startDate, endDate]);
+
     // Calculate status counts
     const statusCounts = useMemo(() => {
-        const counts = {
+        const counts: Record<string, number> = {
             'Todos': 0,
             'Pendente': 0,
             'Em Andamento': 0,
@@ -268,6 +342,16 @@ export const DocumentList: React.FC = () => {
             'Entregue': 0,
             'Vencidos': 0
         };
+
+        if (viewMode === 'empresarial') {
+            companyViewData.forEach(comp => {
+                counts['Todos']++;
+                if (counts[comp.status] !== undefined) {
+                    counts[comp.status]++;
+                }
+            });
+            return counts;
+        }
 
         const todayStr = new Date().toISOString().split('T')[0];
 
@@ -299,7 +383,7 @@ export const DocumentList: React.FC = () => {
         });
 
         return counts;
-    }, [documents, searchTerm, startDate, endDate]);
+    }, [documents, searchTerm, startDate, endDate, viewMode, companyViewData]);
 
     const filterOptions = [
         { label: 'Todos', value: 'Todos' },
@@ -614,6 +698,24 @@ export const DocumentList: React.FC = () => {
                             </div>
                         )}
                     </div>
+
+                    {/* View Mode Toggle */}
+                    <div className="flex bg-white rounded-2xl shadow-sm p-1 border border-gray-100 h-[52px]">
+                        <button
+                            onClick={() => setViewMode('normal')}
+                            className={`p-2.5 rounded-xl transition-all flex items-center justify-center ${viewMode === 'normal' ? 'bg-ios-blue text-white shadow-md shadow-blue-500/20' : 'text-gray-400 hover:text-gray-600'} w-12 h-10 my-auto`}
+                            title="Visão Atual"
+                        >
+                            <Layers size={20} />
+                        </button>
+                        <button
+                            onClick={() => setViewMode('empresarial')}
+                            className={`p-2.5 rounded-xl transition-all flex items-center justify-center ${viewMode === 'empresarial' ? 'bg-ios-blue text-white shadow-md shadow-blue-500/20' : 'text-gray-400 hover:text-gray-600'} w-12 h-10 my-auto`}
+                            title="Visão Empresarial"
+                        >
+                            <Building2 size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2 mb-10">
@@ -650,7 +752,7 @@ export const DocumentList: React.FC = () => {
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-ios-blue"></div>
                 </div>
-            ) : (
+            ) : viewMode === 'normal' ? (
                 <div className="space-y-12">
                     {filteredMonths.map(month => {
                         const todayStr = new Date().toISOString().split('T')[0];
@@ -804,6 +906,47 @@ export const DocumentList: React.FC = () => {
                         );
                     })}
                 </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {/* Agrupamento por empresa da view empresarial */}
+                    {(companyViewData.filter(c => statusFilter === 'Todos' || c.status === statusFilter)).map((company: any) => (
+                        <div
+                            key={`empresa-${company.empresaId}`}
+                            className="group cursor-pointer"
+                            onClick={() => setSelectedCompanyDocs({ nome_unidade: company.nome_unidade, docs: company.docs })}
+                        >
+                            <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="w-10 h-10 rounded-2xl bg-gray-50 flex items-center justify-center text-gray-500 group-hover:bg-gray-800 group-hover:text-white transition-colors duration-300">
+                                        <Building2 size={20} strokeWidth={2.5} />
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Badge status={company.status} />
+                                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${company.feitos === company.total ? 'bg-green-100 text-green-700' : 'bg-blue-50 text-ios-blue'}`}>
+                                            {company.feitos}/{company.total} concluídos
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={company.nome_unidade}>
+                                    {company.nome_unidade}
+                                </h3>
+
+                                <div className="mt-4 pt-4 border-t border-gray-100">
+                                    <div className="w-full bg-gray-100 rounded-full h-2 mb-1 overflow-hidden">
+                                        <div
+                                            className={`h-2 rounded-full ${company.feitos === company.total ? 'bg-green-500' : 'bg-ios-blue'}`}
+                                            style={{ width: `${Math.max(5, (company.feitos / company.total) * 100)}%` }}
+                                        ></div>
+                                    </div>
+                                    <div className="text-right text-[10px] text-gray-400 font-bold uppercase">
+                                        {Math.round((company.feitos / company.total) * 100)}% Progresso
+                                    </div>
+                                </div>
+                            </Card>
+                        </div>
+                    ))}
+                </div>
             )}
 
             {/* Create Modal */}
@@ -925,7 +1068,7 @@ export const DocumentList: React.FC = () => {
             {/* Edit Modal */}
             {
                 selectedDoc && (
-                    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
                         <Card className="w-full max-w-lg overflow-hidden animate-scale-in p-0 shadow-2xl">
                             <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-gray-50/50">
                                 <div>
@@ -2055,6 +2198,63 @@ export const DocumentList: React.FC = () => {
                                 <Button variant="danger" className="flex-1 shadow-red-500/20" onClick={executeDelete}>
                                     Sim, Excluir
                                 </Button>
+                            </div>
+                        </div>
+                    </Card>
+                </div>
+            )}
+
+            {/* Company Docs Modal */}
+            {selectedCompanyDocs && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
+                    <Card className="w-full max-w-4xl max-h-[85vh] overflow-hidden animate-scale-in p-0 shadow-2xl flex flex-col">
+                        <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-white/50 backdrop-blur-xl shrink-0">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">{selectedCompanyDocs.nome_unidade}</h2>
+                                <p className="text-sm text-gray-500">Documentos da empresa</p>
+                            </div>
+                            <button onClick={() => setSelectedCompanyDocs(null)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-200 transition-all">
+                                <span className="text-xl leading-none">&times;</span>
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto flex-1 bg-gray-50/50">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {selectedCompanyDocs.docs.map(doc => (
+                                    <Card
+                                        key={doc.id}
+                                        className="p-4 hover:shadow-md transition-shadow bg-white flex flex-col h-full cursor-pointer hover:border-ios-blue/50"
+                                        onClick={() => setSelectedDoc(doc)}
+                                    >
+                                        <div className="flex justify-between items-start mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-ios-blue shrink-0">
+                                                    <FileIcon size={16} strokeWidth={2.5} />
+                                                </div>
+                                                <Badge status={doc.status} />
+                                            </div>
+                                            <div className="text-gray-900 font-bold text-sm shrink-0">
+                                                {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                            </div>
+                                        </div>
+
+                                        <h4 className="font-semibold text-gray-800 text-sm mb-3" title={doc.procedimento?.nome || 'Sem nome'}>
+                                            {doc.procedimento?.nome || 'Sem nome'}
+                                        </h4>
+
+                                        <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg mt-auto shrink-0">
+                                            <Calendar size={12} className="text-gray-400" />
+                                            <span className="font-medium">
+                                                Prazo: {(() => {
+                                                    const parts = doc.prazo.split('-');
+                                                    if (parts.length < 3) return doc.prazo;
+                                                    const [year, month, day] = parts;
+                                                    return `${day}/${month}/${year}`;
+                                                })()}
+                                            </span>
+                                        </div>
+                                    </Card>
+                                ))}
                             </div>
                         </div>
                     </Card>
