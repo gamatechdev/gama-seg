@@ -117,8 +117,13 @@ export const TrainingList: React.FC = () => {
         if (n.includes('nr20') || n.includes('nr 20') || n.includes('inflamaveis')) return 'nr20';
         if (n.includes('nr23') || n.includes('nr 23') || n.includes('incendio')) return 'nr23';
         if (n.includes('nr26') || n.includes('nr 26') || n.includes('sinalizacao')) return 'nr26';
+        // Retorna a tag 'nr32' se o nome mencionar 'nr32' ou área hospitalar
         if (n.includes('nr32') || n.includes('nr 32') || n.includes('hospitalar') || n.includes('saude')) return 'nr32';
+        // Retorna a tag 'nr33' se o nome mencionar 'nr33' ou trabalho em altura/confinado
+        if (n.includes('nr33') || n.includes('nr 33') || n.includes('confinado')) return 'nr33';
+        // Retorna a tag 'nr34' se o nome mencionar 'nr34' ou área naval
         if (n.includes('nr34') || n.includes('nr 34') || n.includes('naval')) return 'nr34';
+        // Retorna a tag 'nr35' se o nome mencionar 'nr35' ou trabalho em altura
         if (n.includes('nr35') || n.includes('nr 35') || n.includes('altura')) return 'nr35';
 
         return ''; // Unknown tag - will be filtered out
@@ -382,13 +387,22 @@ export const TrainingList: React.FC = () => {
         if (p.id === 428) return true; // Explicitly allow NR 17 (ID 428)
         if (p.id === 445) return true; // Explicitly allow NR 34 (ID 445)
 
-        // Explicitly check for names "NR10" and "NR32" regardless of category
+        // Verifica explicitamente os nomes das NRs, independentemente da categoria associada
         const lowerName = p.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        // Retorna verdadeiro se o nome for de NR 05
+        if (lowerName.includes('nr05') || lowerName.includes('nr 05')) return true;
+        // Retorna verdadeiro se o nome for de NR 10
         if (lowerName.includes('nr10') || lowerName.includes('nr 10')) return true;
+        // Retorna verdadeiro se o nome for de NR 32
         if (lowerName.includes('nr32') || lowerName.includes('nr 32')) return true;
+        // Retorna verdadeiro se o nome for de NR 33
+        if (lowerName.includes('nr33') || lowerName.includes('nr 33')) return true;
 
+        // Verifica se a categoria não é 46, rejeitando o procedimento
         if (p.idcategoria !== 46) return false;
+        // Captura a tag baseada no nome usando a função auxiliar
         const tag = detectTrainingTag(p.nome);
+        // Retorna válido caso uma tag tenha sido encontrada
         return tag !== ''; // Only allow if mapped to a known tag
     });
 
