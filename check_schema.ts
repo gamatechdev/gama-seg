@@ -1,4 +1,3 @@
-
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = "https://wofipjazcxwxzzxjsflh.supabase.co";
@@ -7,18 +6,17 @@ const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 async function checkSchema() {
-    console.log("Checking schema for 'clientes' table...");
-    const { data, error } = await supabase
-        .from('clientes')
+    console.log("Fetching procedure with ID 416...");
+    const { data: results, error } = await supabase
+        .from('procedimento')
         .select('*')
-        .limit(1);
+        .eq('id', 416)
+        .single();
 
     if (error) {
         console.error("Error fetching data:", error);
     } else {
-        console.log("Sample record from 'clientes':");
-        console.log(JSON.stringify(data[0], null, 2));
-        console.log("\nKeys in 'clientes':", Object.keys(data[0] || {}).join(", "));
+        console.log("Procedure 416 details:", JSON.stringify(results, null, 2));
     }
 }
 
