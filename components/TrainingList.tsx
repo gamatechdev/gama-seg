@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { supabase } from '../services/supabase';
 import { Treinamento, MONTHS, Aluno, Procedimento } from '../types';
 import { Card, Badge, Button, Input, Select, GlassHeader, Toggle } from './UI';
-import { Plus, Search, Calendar, User, Clock, GraduationCap, CheckCircle, DollarSign, Laptop, FileText, Loader2, Download, AlertTriangle, Wallet, CheckCircle2, Building } from 'lucide-react';
+import { Plus, Search, Calendar, User, Clock, GraduationCap, CheckCircle, DollarSign, Laptop, FileText, Loader2, Download, AlertTriangle, Wallet, CheckCircle2, Building, Activity, FileStack, ArrowRight } from 'lucide-react';
+import { DocSeg } from '../types';
 
 export const TrainingList: React.FC = () => {
     const [trainings, setTrainings] = useState<Treinamento[]>([]);
@@ -12,6 +13,9 @@ export const TrainingList: React.FC = () => {
     // Modals
     const [showModal, setShowModal] = useState(false);
     const [selectedTraining, setSelectedTraining] = useState<Treinamento | null>(null);
+    const [specialDocs, setSpecialDocs] = useState<DocSeg[]>([]);
+    const [selectedSpecialGroup, setSelectedSpecialGroup] = useState<{ empresaId: number; nome_unidade: string; docs: DocSeg[] } | null>(null);
+    const [selectedRegularGroup, setSelectedRegularGroup] = useState<{ treinamento: string; empresa: string; docs: Treinamento[] } | null>(null);
 
     // Certificate State
     const [generatingCert, setGeneratingCert] = useState(false);
@@ -43,19 +47,32 @@ export const TrainingList: React.FC = () => {
             const { data, error } = await supabase
                 .from('treinamentos')
                 .select(`
-          *,
-          aluno_rel:aluno (
-            id, 
-            nome, 
-            cpf, 
-            unidades:empresa (nome_unidade, empresaid, nome_unidade)
-          ),
-          procedimento:treinamento (id, nome, idcategoria)
-        `)
+                  *,
+                  aluno_rel:aluno (
+                    id, 
+                    nome, 
+                    cpf, 
+                    unidades:empresa (nome_unidade, empresaid)
+                  ),
+                  procedimento:treinamento (id, nome, idcategoria)
+                `)
                 .order('data_realizacao', { ascending: false });
 
             if (error) throw error;
             if (data) setTrainings(data as unknown as Treinamento[]);
+
+            const { data: specialData, error: specialError } = await supabase
+                .from('doc_seg')
+                .select(`
+                    *,
+                    unidades:empresa (id, nome_unidade),
+                    procedimento:doc (id, nome, idcategoria)
+                `)
+                .gte('doc', 412)
+                .lte('doc', 446);
+
+            if (specialError) throw specialError;
+            if (specialData) setSpecialDocs(specialData as unknown as DocSeg[]);
 
             const { data: alData } = await supabase.from('aluno').select('id, nome, cpf');
             const { data: procData } = await supabase.from('procedimento').select('id, nome, idcategoria');
@@ -366,19 +383,88 @@ export const TrainingList: React.FC = () => {
     };
 
     const groupedTrainings = useMemo(() => {
-        const groups: { [key: number]: Treinamento[] } = {};
+        const groups: { [key: string]: any[] } = {};
+        
+        // Process regular trainings
         trainings.forEach(t => {
             const date = new Date(t.data_realizacao);
-            const month = date.getMonth() + 1; // 1-12
-            if (!groups[month]) groups[month] = [];
-            groups[month].push(t);
-        });
-        return groups;
-    }, [trainings]);
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1;
+            const groupKey = `${year}-${month}`;
+            
+            if (!groups[groupKey]) groups[groupKey] = [];
+            
+            // Agrupar por empresa e nome do treinamento para verificar multiplicidade
+            const empresaNome = (t.aluno_rel as any)?.unidades?.nome_unidade || 'Empresa desconhecida';
+            const treinamentoNome = t.procedimento?.nome || 'Treinamento Geral';
+            const matchKey = `${empresaNome}-${treinamentoNome}`;
+            
+            const existingGroup = groups[groupKey].find(g => 
+                g.isRegularGroup && 
+                g.matchKey === matchKey
+            );
 
-    const filteredMonths = Object.keys(groupedTrainings)
-        .map(Number)
-        .sort((a, b) => b - a);
+            if (existingGroup) {
+                existingGroup.docs.push(t);
+                existingGroup.count = existingGroup.docs.length;
+            } else {
+                groups[groupKey].push({
+                    isRegularGroup: true,
+                    matchKey: matchKey,
+                    empresa: empresaNome,
+                    treinamento: treinamentoNome,
+                    count: 1,
+                    docs: [t],
+                    // Dados do primeiro para exibição individual se for apenas 1
+                    data_realizacao: t.data_realizacao,
+                    horario: t.horario,
+                    modelo: t.modelo,
+                    faturado: t.faturado,
+                    aluno_nome: t.aluno_rel?.nome,
+                    aluno_unidade: empresaNome,
+                    certificado_enviado: t.certificado_enviado,
+                    url_certificado: t.url_certificado,
+                    id: t.id,
+                    participou: t.participou
+                });
+            }
+        });
+
+        // Track special groups from doc_seg (IDs 412-446)
+        specialDocs.forEach(doc => {
+            const year = new Date(doc.created_at).getFullYear();
+            const month = doc.mes;
+            const groupKey = `${year}-${month}`;
+            
+            if (!groups[groupKey]) groups[groupKey] = [];
+            
+            const empresaId = doc.empresa;
+            const existingSpecial = groups[groupKey].find(g => g.isSpecialGroup && g.empresaId === empresaId);
+
+            if (existingSpecial) {
+                existingSpecial.docs.push(doc);
+                existingSpecial.count = existingSpecial.docs.length;
+            } else {
+                groups[groupKey].push({
+                    isSpecialGroup: true,
+                    empresaId: doc.empresa,
+                    nome_unidade: doc.unidades?.nome_unidade || 'Empresa desconhecida',
+                    count: 1,
+                    docs: [doc]
+                });
+            }
+        });
+
+        return groups;
+    }, [trainings, specialDocs]);
+
+    const filteredGroupKeys = Object.keys(groupedTrainings)
+        .sort((a, b) => {
+            const [yearA, monthA] = a.split('-').map(Number);
+            const [yearB, monthB] = b.split('-').map(Number);
+            if (yearA !== yearB) return yearB - yearA;
+            return monthB - monthA;
+        });
 
     // Filter procedures for dropdown (idcategoria 46) AND supported tags OR specific ID 417, 428, 445 OR name includes NR10/NR32
     const filteredProcedimentos = procedimentos.filter(p => {
@@ -436,84 +522,159 @@ export const TrainingList: React.FC = () => {
                     </div>
                 ) : (
                     <div className="space-y-12">
-                        {filteredMonths.map(month => {
-                            const itemsInMonth = groupedTrainings[month].filter(t =>
-                                (t.aluno_rel?.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                (t.procedimento?.nome || '').toLowerCase().includes(searchTerm.toLowerCase())
-                            );
+                        {filteredGroupKeys.map(key => {
+                            const [year, month] = key.split('-').map(Number);
+                            const itemsInMonth = (groupedTrainings[key] as any[]).filter(item => {
+                                if (item.isSpecialGroup) {
+                                    return item.nome_unidade.toLowerCase().includes(searchTerm.toLowerCase());
+                                }
+                                if (item.isRegularGroup) {
+                                    const matchEmpresa = item.empresa.toLowerCase().includes(searchTerm.toLowerCase());
+                                    const matchTreino = item.treinamento.toLowerCase().includes(searchTerm.toLowerCase());
+                                    const matchAlunos = item.docs.some((d: any) => (d.aluno_rel?.nome || '').toLowerCase().includes(searchTerm.toLowerCase()));
+                                    return matchEmpresa || matchTreino || matchAlunos;
+                                }
+                                return false;
+                            });
 
                             if (itemsInMonth.length === 0) return null;
 
                             return (
-                                <div key={month} className="animate-fade-in-up">
+                                <div key={key} className="animate-fade-in-up">
                                     <div className="flex items-center gap-3 mb-6 ml-2">
                                         <div className="w-1.5 h-6 bg-purple-500 rounded-full"></div>
-                                        <h2 className="text-xl font-bold text-gray-800">{MONTHS[month - 1]}</h2>
+                                        <h2 className="text-xl font-bold text-gray-800">
+                                            {MONTHS[month - 1]} <span className="text-gray-400 font-medium ml-1">{year}</span>
+                                        </h2>
                                     </div>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {itemsInMonth.map(t => (
-                                            <div key={t.id} onClick={() => setSelectedTraining(t)} className="cursor-pointer group">
-                                                <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col">
-                                                    {t.certificado_enviado && (
-                                                        <div className="absolute top-0 right-0 p-2.5 bg-purple-500/10 rounded-bl-2xl">
-                                                            <CheckCircle size={16} className="text-purple-600" />
-                                                        </div>
-                                                    )}
-                                                    <div className="flex justify-between items-start mb-4">
-                                                        <div className="w-10 h-10 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
-                                                            <GraduationCap size={20} />
-                                                        </div>
-                                                        <Badge status={t.participou ? 'Presente' : 'Ausente'} />
-                                                    </div>
-                                                    <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1">
-                                                        {t.procedimento?.nome || 'Treinamento Geral'}
-                                                    </h3>
-                                                    <div className="flex items-center gap-1.5 text-sm text-gray-500 font-medium mb-auto">
-                                                        <User size={14} className="text-gray-400" />
-                                                        <span className="truncate">{t.aluno_rel?.nome || 'Aluno S/N'}</span>
-                                                    </div>
-                                                    {((t.aluno_rel as any)?.unidades) && (
-                                                        <div className="flex items-center gap-1.5 text-sm text-gray-500 font-medium mt-1">
-                                                            <Building size={14} className="text-gray-400" />
-                                                            <span className="truncate">
-                                                                {Array.isArray((t.aluno_rel as any).unidades)
-                                                                    ? ((t.aluno_rel as any).unidades[0]?.nome_unidade || (t.aluno_rel as any).unidades[0]?.nome_unidade)
-                                                                    : ((t.aluno_rel as any).unidades.nome_unidade || (t.aluno_rel as any).unidades.nome_unidade)}
-                                                            </span>
-                                                        </div>
-                                                    )}
-
-                                                    <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
-                                                        <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
-                                                            <Calendar size={12} />
-                                                            {new Date(t.data_realizacao).toLocaleDateString()}
-                                                        </div>
-                                                        <div className="text-gray-900 font-semibold flex items-center gap-1">
-                                                            <Clock size={12} className="text-gray-400" />
-                                                            {t.horario.substring(0, 5)}
-                                                        </div>
-                                                        {t.faturado && (
-                                                            <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
-                                                                <DollarSign size={10} />
+                                        {itemsInMonth.map((item, idx) => {
+                                            if (item.isSpecialGroup) {
+                                                return (
+                                                    <div key={`special-${item.empresaId}-${key}-${idx}`} onClick={() => setSelectedSpecialGroup(item)} className="cursor-pointer group">
+                                                        <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ring-1 ring-purple-100 bg-purple-50/20">
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
+                                                                    <FileStack size={20} strokeWidth={2.5} />
+                                                                </div>
+                                                                <div className="bg-purple-600 text-white px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                                                    {item.count} Documentos
+                                                                </div>
                                                             </div>
-                                                        )}
+                                                            <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1 truncate" title={item.nome_unidade}>
+                                                                {item.nome_unidade}
+                                                            </h3>
+                                                            <div className="text-sm text-purple-600 font-bold mb-auto flex items-center gap-1.5">
+                                                                <Activity size={14} /> Treinamentos de Normas
+                                                            </div>
+                                                            <div className="pt-4 mt-4 border-t border-purple-100/50 flex justify-end">
+                                                                <span className="text-[10px] font-bold text-purple-500 flex items-center gap-1 group-hover:gap-2 transition-all">
+                                                                    VER TODOS <ArrowRight size={10} />
+                                                                </span>
+                                                            </div>
+                                                        </Card>
                                                     </div>
+                                                );
+                                            }
 
-                                                    {t.url_certificado && (
-                                                        <div className="mt-3 flex items-center justify-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 py-1 rounded-md">
-                                                            <FileText size={10} /> CERTIFICADO GERADO
+                                            if (item.isRegularGroup) {
+                                                // Estilo híbrido: se for apenas 1, mostra individual. Se for >1, mostra agrupado.
+                                                if (item.count === 1) {
+                                                    const t = item.docs[0];
+                                                    return (
+                                                        <div key={`individual-${t.id}`} onClick={() => setSelectedTraining(t)} className="cursor-pointer group">
+                                                            <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col">
+                                                                {t.certificado_enviado && (
+                                                                    <div className="absolute top-0 right-0 p-2.5 bg-purple-500/10 rounded-bl-2xl">
+                                                                        <CheckCircle size={16} className="text-purple-600" />
+                                                                    </div>
+                                                                )}
+                                                                <div className="flex justify-between items-start mb-4">
+                                                                    <div className="w-10 h-10 rounded-2xl bg-purple-50 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
+                                                                        <GraduationCap size={20} />
+                                                                    </div>
+                                                                    <Badge status={t.participou ? 'Presente' : 'Ausente'} />
+                                                                </div>
+                                                                <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1">
+                                                                    {t.procedimento?.nome || 'Treinamento Geral'}
+                                                                </h3>
+                                                                <div className="flex items-center gap-1.5 text-sm text-gray-500 font-medium mb-auto">
+                                                                    <User size={14} className="text-gray-400" />
+                                                                    <span className="truncate">{t.aluno_rel?.nome || 'Aluno S/N'}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 text-sm text-gray-500 font-medium mt-1">
+                                                                    <Building size={14} className="text-gray-400" />
+                                                                    <span className="truncate">{item.empresa}</span>
+                                                                </div>
+
+                                                                <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
+                                                                    <div className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-2 py-1 rounded-lg">
+                                                                        <Calendar size={12} />
+                                                                        {new Date(t.data_realizacao).toLocaleDateString()}
+                                                                    </div>
+                                                                    <div className="text-gray-900 font-semibold flex items-center gap-1">
+                                                                        <Clock size={12} className="text-gray-400" />
+                                                                        {t.horario.substring(0, 5)}
+                                                                    </div>
+                                                                    {t.faturado && (
+                                                                        <div title="Faturado" className="bg-green-100 text-green-700 p-1 rounded-md">
+                                                                            <DollarSign size={10} />
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+
+                                                                {t.url_certificado && (
+                                                                    <div className="mt-3 flex items-center justify-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 py-1 rounded-md">
+                                                                        <FileText size={10} /> CERTIFICADO GERADO
+                                                                    </div>
+                                                                )}
+                                                            </Card>
                                                         </div>
-                                                    )}
+                                                    );
+                                                }
 
-                                                    <div className="mt-2 text-center">
-                                                        <span className="inline-block px-2.5 py-1 bg-gray-50 text-gray-500 rounded-md text-[10px] uppercase font-bold tracking-wider">
-                                                            {t.modelo}
-                                                        </span>
+                                                return (
+                                                    <div key={`regular-${item.empresa}-${item.treinamento}-${idx}`} onClick={() => setSelectedRegularGroup(item)} className="cursor-pointer group">
+                                                        <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ring-1 ring-ios-blue/10 bg-ios-blue/5">
+                                                            <div className="flex justify-between items-start mb-4">
+                                                                <div className="w-10 h-10 rounded-2xl bg-ios-blue/10 flex items-center justify-center text-ios-blue group-hover:bg-ios-blue group-hover:text-white transition-colors duration-300">
+                                                                    <GraduationCap size={20} />
+                                                                </div>
+                                                                <div className="bg-ios-blue text-white px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                                                    x{item.count} Alunos
+                                                                </div>
+                                                            </div>
+                                                            <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1">
+                                                                {item.treinamento}
+                                                            </h3>
+                                                            <div className="flex items-center gap-1.5 text-sm text-gray-500 font-medium mb-auto">
+                                                                <Building size={14} className="text-gray-400" />
+                                                                <span className="truncate">{item.empresa}</span>
+                                                            </div>
+
+                                                            <div className="pt-4 mt-4 border-t border-ios-blue/10 flex justify-between items-center text-xs font-medium">
+                                                                <div className="flex items-center gap-1.5 text-gray-500 bg-white/50 px-2 py-1 rounded-lg">
+                                                                    <Calendar size={12} />
+                                                                    {new Date(item.data_realizacao).toLocaleDateString()}
+                                                                </div>
+                                                                <div className="text-gray-900 font-semibold flex items-center gap-1">
+                                                                    <Clock size={12} className="text-gray-400" />
+                                                                    {item.horario.substring(0, 5)}
+                                                                </div>
+                                                            </div>
+                                                            <div className="mt-3 text-center">
+                                                                <span className="inline-block px-2.5 py-1 bg-ios-blue text-white rounded-md text-[10px] uppercase font-bold tracking-wider group-hover:bg-ios-blue-dark">
+                                                                    Ver {item.count} Alunos
+                                                                </span>
+                                                            </div>
+                                                        </Card>
                                                     </div>
-                                                </Card>
-                                            </div>
-                                        ))}
+                                                );
+                                            }
+
+                                            return null;
+                                        })}
                                     </div>
                                 </div>
                             );
@@ -822,6 +983,103 @@ export const TrainingList: React.FC = () => {
                         <div className="p-5 border-t border-gray-100 flex gap-3">
                             <Button variant="ghost" className="flex-1" onClick={() => setSelectedTraining(null)}>Cancelar</Button>
                             <Button className="flex-1 bg-purple-600 hover:bg-purple-700 shadow-purple-500/30" onClick={handleUpdate}>Atualizar</Button>
+                        </div>
+                    </Card>
+                </div>
+            )}
+            {/* Special Group Modal */}
+            {selectedSpecialGroup && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
+                    <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
+                        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-purple-50">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900 leading-tight">Documentos de Treinamento</h2>
+                                <p className="text-purple-600 text-sm mt-1 font-semibold flex items-center gap-1.5">
+                                    <Building size={14} /> {selectedSpecialGroup.nome_unidade}
+                                </p>
+                            </div>
+                            <button onClick={() => setSelectedSpecialGroup(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                                <span className="text-2xl leading-none">&times;</span>
+                            </button>
+                        </div>
+                        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
+                            {selectedSpecialGroup.docs.map(doc => (
+                                <div key={doc.id} className="p-4 border border-gray-100 rounded-xl hover:shadow-md transition-shadow bg-white">
+                                    <div className="flex justify-between items-start mb-2">
+                                        <div>
+                                            <h4 className="font-bold text-gray-800 flex items-center gap-2">
+                                                <GraduationCap size={16} className="text-purple-500" />
+                                                {doc.procedimento?.nome}
+                                            </h4>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Referência: {doc.mes}/{new Date(doc.created_at).getFullYear()}
+                                            </p>
+                                        </div>
+                                        <Badge status={doc.status} />
+                                    </div>
+                                    <div className="flex items-center gap-4 text-xs font-medium text-gray-600 mt-4 border-t pt-3 border-gray-50">
+                                        <div className="flex items-center gap-1.5">
+                                            <Calendar size={12} className="text-gray-400" />
+                                            Prazo: {new Date(doc.prazo).toLocaleDateString()}
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <DollarSign size={12} className="text-green-500" />
+                                            {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
+                                        </div>
+                                        {doc.faturado && (
+                                            <div className="flex items-center gap-1 ml-auto bg-green-50 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold">
+                                                <DollarSign size={10} /> FATURADO
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                            <Button variant="secondary" onClick={() => setSelectedSpecialGroup(null)}>Fechar</Button>
+                        </div>
+                    </Card>
+                </div>
+            )}
+            {/* Regular Group Modal */}
+            {selectedRegularGroup && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
+                    <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
+                        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-blue-50/50">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900 leading-tight">{selectedRegularGroup.treinamento}</h2>
+                                <p className="text-ios-blue text-sm mt-1 font-semibold flex items-center gap-1.5">
+                                    <Building size={14} /> {selectedRegularGroup.empresa}
+                                </p>
+                            </div>
+                            <button onClick={() => setSelectedRegularGroup(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                                <span className="text-2xl leading-none">&times;</span>
+                            </button>
+                        </div>
+                        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+                            {selectedRegularGroup.docs.map(t => (
+                                <div key={t.id} className="p-4 border border-gray-100 rounded-xl hover:shadow-md transition-shadow bg-white flex justify-between items-center group/item hover:border-ios-blue/30" onClick={() => {
+                                    setSelectedRegularGroup(null);
+                                    setSelectedTraining(t);
+                                }}>
+                                    <div>
+                                        <h4 className="font-bold text-gray-800 flex items-center gap-2">
+                                            <User size={16} className="text-ios-blue" />
+                                            {t.aluno_rel?.nome}
+                                        </h4>
+                                        <p className="text-[10px] text-gray-400 mt-0.5 uppercase font-bold tracking-tighter">
+                                            CPF: {t.aluno_rel?.cpf} • {t.modelo}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <Badge status={t.participou ? 'Presente' : 'Ausente'} />
+                                        <ArrowRight size={16} className="text-gray-300 group-hover/item:text-ios-blue transition-colors" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+                            <Button variant="secondary" onClick={() => setSelectedRegularGroup(null)}>Fechar</Button>
                         </div>
                     </Card>
                 </div>
