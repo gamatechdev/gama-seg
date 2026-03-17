@@ -57,7 +57,7 @@ export interface Treinamento {
 }
 
 // For UI State
-export type ViewState = 'documents' | 'students' | 'trainings';
+export type ViewState = 'documents' | 'students' | 'trainings' | 'psicossocial';
 
 export const MONTHS = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",

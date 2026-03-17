@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, GraduationCap, LogOut, Users } from 'lucide-react';
+import { FileText, GraduationCap, Heart, LogOut, Users } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface SidebarProps {
@@ -39,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onViewChange, onL
           <NavItem view="documents" icon={FileText} label="Documentos" />
           <NavItem view="students" icon={Users} label="Alunos" />
           <NavItem view="trainings" icon={GraduationCap} label="Treinamentos" />
+          <NavItem view="psicossocial" icon={Heart} label="Psicossocial" />
         </nav>
       </div>
 

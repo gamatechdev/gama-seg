@@ -23,7 +23,6 @@ export const DocumentList: React.FC = () => {
     const [showMedicalDataModal, setShowMedicalDataModal] = useState(false);
     const [showScheduleModal, setShowScheduleModal] = useState(false);
     const [selectedDoc, setSelectedDoc] = useState<DocSeg | null>(null);
-    const [selectedPsicoGroup, setSelectedPsicoGroup] = useState<{ empresaId: number; nome_unidade: string; docs: DocSeg[] } | null>(null);
     const [selectedCompanyDocs, setSelectedCompanyDocs] = useState<{ nome_unidade: string; docs: DocSeg[] } | null>(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -70,7 +69,8 @@ export const DocumentList: React.FC = () => {
           unidades:empresa (id, nome_unidade),
           procedimento:doc (id, nome, idcategoria)
         `)
-                .order('created_at', { ascending: false });
+                .order('created_at', { ascending: false })
+                .not('doc', 'in', '(576,577)'); // Exclui avaliações psicossociais transferidas para a tela própria
 
             if (error) throw error;
             if (data) setDocuments(data as unknown as DocSeg[]);
@@ -110,6 +110,14 @@ export const DocumentList: React.FC = () => {
             });
         }
     }, [selectedDoc]);
+
+    // Função para ocultar "NR" seguido de números da descrição do serviço
+    const cleanServiceName = (name: string) => {
+        if (!name) return 'Sem nome';
+        // Regex para remover "NR" seguido de números (com ou sem espaço, ex: NR 35, NR10)
+        // O padrão remove o "NR" e os dígitos, e também espaços extras resultantes
+        return name.replace(/NR\s?\d+/gi, '').trim().replace(/\s\s+/g, ' ');
+    };
 
     // Company Form Data
     const [companyFormData, setCompanyFormData] = useState({
@@ -558,49 +566,10 @@ export const DocumentList: React.FC = () => {
     const groupedDocs = useMemo(() => {
         const groups: { [key: number]: any[] } = {};
 
-        // Vamos manter um rastreamento dos grupos psicossociais por mês e empresa
-        const psicoTrack: { [mes: number]: { [empresa: number]: { count: number; deliveredCount: number; docIndex: number; baseDoc: DocSeg; docs: DocSeg[] } } } = {};
-
-        documents.forEach((doc, index) => {
+        documents.forEach((doc) => {
             const m = doc.mes;
             if (!groups[m]) groups[m] = [];
-
-            if (doc.doc === 576 || doc.doc === 577) {
-                if (!psicoTrack[m]) psicoTrack[m] = {};
-
-                if (!psicoTrack[m][doc.empresa]) {
-                    // Primeiro que encontramos (que na verdade é o mais recente, pois a query original é order_by created_at desc)
-                    psicoTrack[m][doc.empresa] = {
-                        count: 1,
-                        deliveredCount: doc.status === 'Entregue' ? 1 : 0,
-                        docIndex: groups[m].length, // Posição que ele ficará no array deste mês
-                        baseDoc: doc,
-                        docs: [doc]
-                    };
-                    // Inserimos um objeto especial que servirá como o card agrupado
-                    groups[m].push({
-                        isPsicossocialGroup: true,
-                        empresaId: doc.empresa,
-                        nome_unidade: doc.unidades?.nome_unidade || 'Empresa desconhecida',
-                        count: 1,
-                        deliveredCount: doc.status === 'Entregue' ? 1 : 0,
-                        baseDoc: doc,
-                        docs: [doc]
-                    });
-                } else {
-                    // Já existe um card de grupo para esta empresa neste mês, apenas incrementamos o contador
-                    psicoTrack[m][doc.empresa].count += 1;
-                    if (doc.status === 'Entregue') psicoTrack[m][doc.empresa].deliveredCount += 1;
-                    psicoTrack[m][doc.empresa].docs.push(doc);
-                    // E atualizamos a propriedade 'count' do objeto já inserido no array
-                    groups[m][psicoTrack[m][doc.empresa].docIndex].count = psicoTrack[m][doc.empresa].count;
-                    groups[m][psicoTrack[m][doc.empresa].docIndex].deliveredCount = psicoTrack[m][doc.empresa].deliveredCount;
-                    groups[m][psicoTrack[m][doc.empresa].docIndex].docs = psicoTrack[m][doc.empresa].docs;
-                }
-            } else {
-                // Documentos normais
-                groups[m].push(doc);
-            }
+            groups[m].push(doc);
         });
         return groups;
     }, [documents]);
@@ -808,41 +777,7 @@ export const DocumentList: React.FC = () => {
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                    {itemsInMonth.map((item, index) => {
-                                        if (item.isPsicossocialGroup) {
-                                            return (
-                                                <div
-                                                    key={`psico-${item.empresaId}-${month}-${index}`}
-                                                    className="group cursor-pointer"
-                                                    onClick={() => setSelectedPsicoGroup({ empresaId: item.empresaId, nome_unidade: item.nome_unidade, docs: item.docs })}
-                                                >
-                                                    <Card className="hover:-translate-y-1 hover:shadow-ios-float transition-all duration-300 relative overflow-hidden h-full flex flex-col ring-1 ring-purple-100 bg-purple-50/10">
-                                                        <div className="flex justify-between items-start mb-4">
-                                                            <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors duration-300">
-                                                                <Activity size={20} strokeWidth={2.5} />
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                {(item.docs as DocSeg[]).some(d => d.prazo < new Date().toISOString().split('T')[0] && d.status !== 'Entregue' && d.status !== 'Concluido') && (
-                                                                    <Badge status="Vencido" />
-                                                                )}
-                                                                <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-xs font-bold">
-                                                                    {item.deliveredCount}/{item.count} avaliações
-                                                                </div>
-                                                            </div>
-                                                        </div>
-
-                                                        <h3 className="font-bold text-[17px] text-gray-900 leading-snug mb-1" title={item.nome_unidade}>
-                                                            {item.nome_unidade}
-                                                        </h3>
-
-                                                        <div className="text-sm text-purple-600 font-bold mb-auto">
-                                                            Psicossocial
-                                                        </div>
-                                                    </Card>
-                                                </div>
-                                            );
-                                        }
-
+                                    {itemsInMonth.map((item) => {
                                         const doc = item as DocSeg;
                                         return (
                                             <div key={doc.id} onClick={() => setSelectedDoc(doc)} className="cursor-pointer group">
@@ -870,7 +805,7 @@ export const DocumentList: React.FC = () => {
                                                     </h3>
 
                                                     <div className="text-sm text-gray-500 font-medium mb-auto">
-                                                        {doc.procedimento?.nome || 'Sem nome'}
+                                                        {cleanServiceName(doc.procedimento?.nome || '')}
                                                     </div>
 
                                                     <div className="pt-4 mt-4 border-t border-gray-100 flex justify-between items-center text-xs font-medium">
@@ -1242,67 +1177,7 @@ export const DocumentList: React.FC = () => {
                 )
             }
 
-            {selectedPsicoGroup && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
-                    <Card className="w-full max-w-2xl overflow-hidden animate-scale-in p-0 shadow-2xl">
-                        <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-start bg-purple-50">
-                            <div>
-                                <h2 className="text-xl font-bold text-gray-900 leading-tight">Avaliações Psicossociais</h2>
-                                <p className="text-purple-600 text-sm mt-1 font-semibold flex items-center gap-1.5">
-                                    <Building2 size={14} /> {selectedPsicoGroup.nome_unidade}
-                                </p>
-                            </div>
-                            <button onClick={() => setSelectedPsicoGroup(null)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
-                                <span className="text-2xl leading-none">&times;</span>
-                            </button>
-                        </div>
-                        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-4">
-                            {selectedPsicoGroup.docs.map(doc => (
-                                <div key={doc.id} className="p-4 border border-gray-100 rounded-xl hover:shadow-md transition-shadow bg-white relative">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div>
-                                            <h4 className="font-bold text-gray-800 flex items-center gap-2">
-                                                <Activity size={16} className="text-purple-500" />
-                                                {doc.procedimento?.nome}
-                                            </h4>
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Recebido em: {new Date(doc.data_recebimento).toLocaleDateString()}
-                                            </p>
-                                        </div>
-                                        <Badge status={doc.status} />
-                                    </div>
-                                    <div className="flex items-center gap-4 text-xs font-medium text-gray-600 mt-4 border-t pt-3 border-gray-50">
-                                        <div className="flex items-center gap-1.5">
-                                            <Calendar size={12} className="text-gray-400" />
-                                            Prazo: {new Date(doc.prazo).toLocaleDateString()}
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
-                                            <DollarSign size={12} className="text-green-500" />
-                                            {doc.valor ? `R$ ${doc.valor.toFixed(2)}` : 'R$ 0,00'}
-                                        </div>
-                                        {doc.obs && (
-                                            <div className="flex items-center gap-1.5 ml-auto text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded" title={doc.obs}>
-                                                <AlignLeft size={12} /> Obs
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="mt-4 flex justify-end">
-                                        <Button size="sm" variant="ghost" className="text-ios-blue text-xs hover:bg-blue-50" onClick={() => {
-                                            setSelectedPsicoGroup(null);
-                                            setSelectedDoc(doc);
-                                        }}>
-                                            Ver Detalhes Documento
-                                        </Button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-end">
-                            <Button variant="secondary" onClick={() => setSelectedPsicoGroup(null)}>Fechar</Button>
-                        </div>
-                    </Card>
-                </div>
-            )}
+
 
             {showGenerateModal && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/40 backdrop-blur-md p-4 animate-fade-in">
@@ -2239,7 +2114,7 @@ export const DocumentList: React.FC = () => {
                                         </div>
 
                                         <h4 className="font-semibold text-gray-800 text-sm mb-3" title={doc.procedimento?.nome || 'Sem nome'}>
-                                            {doc.procedimento?.nome || 'Sem nome'}
+                                            {cleanServiceName(doc.procedimento?.nome || '')}
                                         </h4>
 
                                         <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg mt-auto shrink-0">

@@ -5,6 +5,7 @@ import { DocumentList } from './components/DocumentList';
 import { TrainingList } from './components/TrainingList';
 import { StudentList } from './components/StudentList';
 import { Login } from './components/Login';
+import { Psicossocial } from './components/Psicossocial';
 import { ViewState } from './types';
 
 function App() {
@@ -58,6 +59,7 @@ function App() {
             {currentView === 'documents' && <DocumentList />}
             {currentView === 'students' && <StudentList />}
             {currentView === 'trainings' && <TrainingList />}
+            {currentView === 'psicossocial' && <Psicossocial />}
         </div>
       </main>
     </div>
